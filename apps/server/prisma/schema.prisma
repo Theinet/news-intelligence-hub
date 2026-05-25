@@ -1,0 +1,235 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum FeedStatus {
+  active
+  paused
+  error
+}
+
+enum ArticleStatus {
+  pending
+  processed
+  filtered
+  error
+}
+
+enum Importance {
+  high
+  normal
+  junk
+}
+
+enum EntityType {
+  person
+  company
+  product
+  technology
+  location
+  project
+  other
+}
+
+enum DigestStatus {
+  queued
+  ready
+  error
+}
+
+enum RegenerationStatus {
+  queued
+  running
+  done
+  error
+}
+
+model User {
+  id                String            @id @default(cuid())
+  email             String            @unique
+  passwordHash      String
+  emailVerified     Boolean           @default(false)
+  verificationToken String?
+  createdAt         DateTime          @default(now())
+  feeds             Feed[]
+  categories        Category[]
+  axes              CategoryAxis[]
+  articles          Article[]
+  entities          Entity[]
+  telemetry         LlmTelemetry[]
+  digests           Digest[]
+  regenerations     RegenerationRun[]
+}
+
+model Feed {
+  id          String     @id @default(cuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  url         String
+  title       String?
+  status      FeedStatus @default(active)
+  lastError   String?
+  lastPulledAt DateTime?
+  createdAt   DateTime   @default(now())
+  articles    Article[]
+
+  @@unique([userId, url])
+  @@index([userId, status])
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, name])
+}
+
+model CategoryAxis {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  values    Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, name])
+}
+
+model Article {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  feedId         String?
+  feed           Feed?        @relation(fields: [feedId], references: [id], onDelete: SetNull)
+  title          String
+  url            String
+  normalizedUrl  String
+  author         String?
+  publishedAt    DateTime
+  content        String
+  contentHash    String
+  summary        String?
+  fullSummary    String?
+  importance     Importance   @default(normal)
+  status         ArticleStatus @default(pending)
+  filterReason   String?
+  categories     Json         @default("[]")
+  axes           Json         @default("{}")
+  similarCount   Int          @default(0)
+  llmCacheHit    Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  mentions       ArticleEntity[]
+
+  @@unique([userId, normalizedUrl])
+  @@index([userId, publishedAt])
+  @@index([userId, contentHash])
+  @@index([userId, status])
+}
+
+model Entity {
+  id            String        @id @default(cuid())
+  userId        String
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  canonicalName String
+  normalizedKey String
+  type          EntityType
+  aliases       Json          @default("[]")
+  description   String?
+  firstSeen     DateTime
+  lastSeen      DateTime
+  mentions      ArticleEntity[]
+
+  @@unique([userId, normalizedKey, type])
+  @@index([userId, canonicalName])
+}
+
+model ArticleEntity {
+  articleId String
+  entityId  String
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  entity    Entity  @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, entityId])
+}
+
+model GraphEdge {
+  id        String   @id @default(cuid())
+  userId    String
+  fromId    String
+  toId      String
+  kind      String
+  weight    Int?
+  score     Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, fromId, toId, kind])
+  @@index([userId, kind])
+}
+
+model LlmCache {
+  id          String   @id @default(cuid())
+  contentHash String
+  axesHash    String
+  result      Json
+  createdAt   DateTime @default(now())
+
+  @@unique([contentHash, axesHash])
+}
+
+model LlmTelemetry {
+  id           String   @id @default(cuid())
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  operation    String
+  provider     String
+  model        String
+  calls        Int
+  inputTokens  Int
+  outputTokens Int
+  totalTokens  Int
+  createdAt    DateTime @default(now())
+
+  @@index([userId, operation])
+}
+
+model RegenerationRun {
+  id        String             @id @default(cuid())
+  userId    String
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status    RegenerationStatus @default(queued)
+  total     Int                @default(0)
+  processed Int                @default(0)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+}
+
+model Digest {
+  id            String       @id @default(cuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status        DigestStatus @default(queued)
+  period        String
+  categoryNames Json         @default("[]")
+  entityIds     Json         @default("[]")
+  topEntities   Json         @default("[]")
+  topCategories Json         @default("[]")
+  keyArticles   Json         @default("[]")
+  summary       String?
+  error         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([userId, status])
+}
