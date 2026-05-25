@@ -1,0 +1,438 @@
+import {
+  Activity,
+  BookOpen,
+  GitBranch,
+  LogOut,
+  Plus,
+  RefreshCw,
+  Rss,
+  Settings,
+  ShieldCheck
+} from 'lucide-react';
+import {useCallback, useEffect, useMemo, useState} from 'react';
+import ReactFlow, {Background, Controls, Edge, Node} from 'reactflow';
+
+const apiUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
+
+type View = 'articles' | 'feeds' | 'graph' | 'settings' | 'digests' | 'telemetry';
+type JsonRecord = Record<string, unknown>;
+
+interface Article extends JsonRecord {
+  id: string;
+  title: string;
+  summary?: string;
+  fullSummary?: string;
+  importance: string;
+  status: string;
+  publishedAt: string;
+  categories: string[];
+  axes: Record<string, string>;
+  similarCount: number;
+  feed?: {title?: string};
+  mentions?: Array<{entity: Entity}>;
+}
+
+interface Entity extends JsonRecord {
+  id: string;
+  canonicalName: string;
+  type: string;
+  aliases: string[];
+  description?: string;
+}
+
+interface Feed extends JsonRecord {
+  id: string;
+  title?: string;
+  url: string;
+  status: string;
+  lastError?: string;
+}
+
+interface Category {
+  id: string;
+  name: string;
+}
+
+interface Axis {
+  id: string;
+  name: string;
+  values: string[];
+}
+
+function App() {
+  const [token, setToken] = useState(localStorage.getItem('nih_token') ?? '');
+  const [view, setView] = useState<View>('articles');
+  const [message, setMessage] = useState('');
+
+  const request = useCallback(async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
+    const response = await fetch(`${apiUrl}${path}`, {
+      ...init,
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? {authorization: `Bearer ${token}`} : {}),
+        ...(init.headers ?? {})
+      }
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json() as Promise<T>;
+  }, [token]);
+
+  useEffect(() => {
+    localStorage.setItem('nih_token', token);
+  }, [token]);
+
+  if (location.pathname === '/verify') {
+    return <Verify request={request} />;
+  }
+
+  if (!token) {
+    return <AuthScreen setToken={setToken} setMessage={setMessage} message={message} />;
+  }
+
+  const nav = [
+    ['articles', BookOpen, 'Articles'],
+    ['feeds', Rss, 'Feeds'],
+    ['graph', GitBranch, 'Graph'],
+    ['settings', Settings, 'Settings'],
+    ['digests', ShieldCheck, 'Digests'],
+    ['telemetry', Activity, 'Telemetry']
+  ] as const;
+
+  return (
+    <div className="min-h-screen">
+      <header className="border-b border-line bg-white">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 md:flex-row md:items-center">
+          <div>
+            <h1 className="text-xl font-semibold tracking-normal">News Intelligence Hub</h1>
+            <p className="text-sm text-slate-600">RSS analysis through deterministic queues and semantic graphing.</p>
+          </div>
+          <nav className="flex flex-wrap gap-2 md:ml-auto">
+            {nav.map(([id, Icon, label]) => (
+              <button
+                key={id}
+                className={`flex h-10 items-center gap-2 rounded-md border px-3 text-sm ${
+                  view === id ? 'border-accent bg-teal-50 text-accent' : 'border-line bg-white'
+                }`}
+                onClick={() => setView(id)}
+                title={label}
+              >
+                <Icon size={16} />
+                <span>{label}</span>
+              </button>
+            ))}
+            <button
+              className="flex h-10 items-center gap-2 rounded-md border border-line bg-white px-3 text-sm"
+              onClick={() => setToken('')}
+              title="Log out"
+            >
+              <LogOut size={16} />
+              <span>Logout</span>
+            </button>
+          </nav>
+        </div>
+      </header>
+      <main className="mx-auto max-w-7xl px-4 py-5">
+        {view === 'articles' && <Articles request={request} />}
+        {view === 'feeds' && <Feeds request={request} />}
+        {view === 'graph' && <Graph request={request} />}
+        {view === 'settings' && <SettingsView request={request} />}
+        {view === 'digests' && <Digests request={request} />}
+        {view === 'telemetry' && <Telemetry request={request} />}
+      </main>
+    </div>
+  );
+}
+
+function AuthScreen(props: {
+  setToken: (token: string) => void;
+  setMessage: (message: string) => void;
+  message: string;
+}) {
+  const [email, setEmail] = useState('demo@example.com');
+  const [password, setPassword] = useState('Password123!');
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+
+  async function submit() {
+    const response = await fetch(`${apiUrl}/auth/${mode}`, {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({email, password})
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      props.setMessage(JSON.stringify(data));
+      return;
+    }
+    if (mode === 'login') {
+      props.setToken(data.accessToken);
+    } else {
+      props.setMessage(`DEV MODE verification link: ${data.devVerifyUrl}`);
+    }
+  }
+
+  return (
+    <main className="mx-auto grid min-h-screen max-w-5xl place-items-center px-4">
+      <section className="w-full max-w-md rounded-lg border border-line bg-white p-6 shadow-sm">
+        <h1 className="text-2xl font-semibold">News Intelligence Hub</h1>
+        <div className="mt-5 grid gap-3">
+          <input className="rounded-md border border-line px-3 py-2" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input
+            className="rounded-md border border-line px-3 py-2"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <button className="rounded-md bg-accent px-4 py-2 text-white" onClick={submit}>
+            {mode === 'login' ? 'Login' : 'Register'}
+          </button>
+          <button className="text-left text-sm text-accent" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
+            {mode === 'login' ? 'Create account' : 'Use existing account'}
+          </button>
+          {props.message && <p className="rounded-md bg-teal-50 p-3 text-sm text-accent">{props.message}</p>}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function Verify({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
+  const [state, setState] = useState('Verifying email...');
+  useEffect(() => {
+    const token = new URLSearchParams(location.search).get('token');
+    request(`/auth/verify?token=${token}`).then(() => setState('Email verified. You can log in now.')).catch((error) => {
+      setState(error.message);
+    });
+  }, [request]);
+  return <main className="grid min-h-screen place-items-center text-lg">{state}</main>;
+}
+
+function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [selected, setSelected] = useState<Article | null>(null);
+  const [filters, setFilters] = useState({category: '', importance: '', status: ''});
+  const load = useCallback(() => {
+    const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
+    request<Article[]>(`/articles?${params}`).then(setArticles);
+  }, [filters, request]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <section className="grid gap-4 lg:grid-cols-[1fr_380px]">
+      <div>
+        <Toolbar>
+          <input className="h-10 rounded-md border border-line px-3" placeholder="Category" onChange={(e) => setFilters({...filters, category: e.target.value})} />
+          <select className="h-10 rounded-md border border-line px-3" onChange={(e) => setFilters({...filters, importance: e.target.value})}>
+            <option value="">All importance</option>
+            <option value="high">Important</option>
+            <option value="normal">Normal</option>
+            <option value="junk">Junk</option>
+          </select>
+          <select className="h-10 rounded-md border border-line px-3" onChange={(e) => setFilters({...filters, status: e.target.value})}>
+            <option value="">All states</option>
+            <option value="pending">Pending</option>
+            <option value="processed">Processed</option>
+            <option value="filtered">Filtered</option>
+          </select>
+        </Toolbar>
+        <div className="mt-4 grid gap-3">
+          {articles.map((article) => (
+            <button key={article.id} className="rounded-lg border border-line bg-white p-4 text-left shadow-sm" onClick={() => setSelected(article)}>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <span>{article.feed?.title ?? 'Source'}</span>
+                <span>{new Date(article.publishedAt).toLocaleString()}</span>
+                <span className="rounded bg-slate-100 px-2 py-1">{article.importance}</span>
+                <span>{article.similarCount} similar</span>
+              </div>
+              <h2 className="mt-2 text-base font-semibold">{article.title}</h2>
+              <p className="mt-2 line-clamp-2 text-sm text-slate-600">{article.summary}</p>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                {(article.mentions ?? []).map(({entity}) => <span key={entity.id} className="rounded bg-teal-50 px-2 py-1 text-accent">{entity.canonicalName}</span>)}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+      <aside className="rounded-lg border border-line bg-white p-4 shadow-sm">
+        {selected ? <ArticleDetail article={selected} request={request} /> : <p className="text-sm text-slate-500">Select an article.</p>}
+      </aside>
+    </section>
+  );
+}
+
+function ArticleDetail({article, request}: {article: Article; request: <T>(path: string) => Promise<T>}) {
+  const [full, setFull] = useState<Article>(article);
+  useEffect(() => {
+    request<Article>(`/articles/${article.id}`).then(setFull);
+  }, [article.id, request]);
+  return (
+    <div className="grid gap-3">
+      <h2 className="text-lg font-semibold">{full.title}</h2>
+      <p className="text-sm text-slate-700">{full.fullSummary ?? full.summary}</p>
+      <a className="text-sm text-accent" href={String(full.url)} target="_blank">Open original</a>
+      <div className="flex flex-wrap gap-2">
+        {(full.mentions ?? []).map(({entity}) => <span key={entity.id} className="rounded bg-slate-100 px-2 py-1 text-xs">{entity.canonicalName} / {entity.type}</span>)}
+      </div>
+      <pre className="overflow-auto rounded bg-panel p-3 text-xs">{JSON.stringify(full.axes, null, 2)}</pre>
+    </div>
+  );
+}
+
+function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
+  const [feeds, setFeeds] = useState<Feed[]>([]);
+  const [url, setUrl] = useState('');
+  const load = useCallback(() => request<Feed[]>('/feeds').then(setFeeds), [request]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  async function add() {
+    await request('/feeds', {method: 'POST', body: JSON.stringify({url})});
+    setUrl('');
+    load();
+  }
+  return (
+    <section>
+      <Toolbar>
+        <input className="h-10 min-w-72 rounded-md border border-line px-3" placeholder="RSS or Atom URL" value={url} onChange={(e) => setUrl(e.target.value)} />
+        <button className="flex h-10 items-center gap-2 rounded-md bg-accent px-3 text-white" onClick={add}><Plus size={16} />Add</button>
+      </Toolbar>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        {feeds.map((feed) => (
+          <div key={feed.id} className="rounded-lg border border-line bg-white p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="font-semibold">{feed.title ?? feed.url}</h2>
+                <p className="break-all text-sm text-slate-500">{feed.url}</p>
+              </div>
+              <span className="rounded bg-slate-100 px-2 py-1 text-xs">{feed.status}</span>
+            </div>
+            {feed.lastError && <p className="mt-2 text-sm text-red-700">{feed.lastError}</p>}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button className="rounded-md border border-line px-3 py-2 text-sm" onClick={() => request(`/feeds/${feed.id}/pull`, {method: 'POST'}).then(load)}>Pull</button>
+              <button className="rounded-md border border-line px-3 py-2 text-sm" onClick={() => request(`/feeds/${feed.id}/pause`, {method: 'PATCH'}).then(load)}>Pause</button>
+              <button className="rounded-md border border-line px-3 py-2 text-sm" onClick={() => request(`/feeds/${feed.id}/resume`, {method: 'PATCH'}).then(load)}>Resume</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
+  const [graph, setGraph] = useState<{nodes: JsonRecord[]; edges: JsonRecord[]}>({nodes: [], edges: []});
+  const [nodeKind, setNodeKind] = useState('');
+  const [category, setCategory] = useState('');
+  useEffect(() => {
+    const params = new URLSearchParams(Object.entries({nodeKind, category}).filter(([, value]) => value));
+    request<{nodes: JsonRecord[]; edges: JsonRecord[]}>(`/graph?${params}`).then(setGraph);
+  }, [category, nodeKind, request]);
+  const nodes = useMemo<Node[]>(() => graph.nodes.map((node, index) => ({
+    id: String(node.id),
+    position: {x: (index % 6) * 210, y: Math.floor(index / 6) * 120},
+    data: {label: `${node.kind}: ${node.label}`},
+    style: {borderColor: node.kind === 'article' ? '#0f766e' : '#64748b'}
+  })), [graph.nodes]);
+  const edges = useMemo<Edge[]>(() => graph.edges.map((edge, index) => ({
+    id: `${edge.from}-${edge.to}-${index}`,
+    source: String(edge.from),
+    target: String(edge.to),
+    label: String(edge.kind),
+    animated: edge.kind === 'co_mention'
+  })), [graph.edges]);
+  return (
+    <section>
+      <Toolbar>
+        <select className="h-10 rounded-md border border-line px-3" onChange={(e) => setNodeKind(e.target.value)}>
+          <option value="">All nodes</option>
+          <option value="article">Articles</option>
+          <option value="entity">Entities</option>
+        </select>
+        <input className="h-10 rounded-md border border-line px-3" placeholder="Category" onChange={(e) => setCategory(e.target.value)} />
+      </Toolbar>
+      <div className="mt-4 h-[680px] overflow-hidden rounded-lg border border-line bg-white">
+        <ReactFlow nodes={nodes} edges={edges} fitView>
+          <Background />
+          <Controls />
+        </ReactFlow>
+      </div>
+    </section>
+  );
+}
+
+function SettingsView({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [axes, setAxes] = useState<Axis[]>([]);
+  const [name, setName] = useState('');
+  const load = useCallback(() => {
+    request<Category[]>('/categories').then(setCategories);
+    request<Axis[]>('/axes').then(setAxes);
+  }, [request]);
+  useEffect(load, [load]);
+  async function regenerate() {
+    await request('/regenerations', {method: 'POST'});
+    load();
+  }
+  return (
+    <section className="grid gap-5 lg:grid-cols-2">
+      <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
+        <h2 className="font-semibold">Categories</h2>
+        <div className="mt-3 flex gap-2">
+          <input className="h-10 flex-1 rounded-md border border-line px-3" value={name} onChange={(e) => setName(e.target.value)} />
+          <button className="rounded-md bg-accent px-3 text-white" onClick={() => request('/categories', {method: 'POST', body: JSON.stringify({name})}).then(load)}>Add</button>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">{categories.map((item) => <span key={item.id} className="rounded bg-teal-50 px-2 py-1 text-sm text-accent">{item.name}</span>)}</div>
+      </div>
+      <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-semibold">Categorization axes</h2>
+          <button className="flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm" onClick={regenerate}><RefreshCw size={16} />Regenerate</button>
+        </div>
+        <div className="mt-3 grid gap-3">
+          {axes.map((axis) => (
+            <div key={axis.id} className="rounded-md bg-panel p-3">
+              <input className="w-full rounded border border-line px-2 py-1" value={axis.name} onChange={(e) => setAxes(axes.map((item) => item.id === axis.id ? {...item, name: e.target.value} : item))} />
+              <input className="mt-2 w-full rounded border border-line px-2 py-1" value={axis.values.join(', ')} onChange={(e) => setAxes(axes.map((item) => item.id === axis.id ? {...item, values: e.target.value.split(',').map((value) => value.trim())} : item))} />
+              <button className="mt-2 rounded border border-line px-3 py-1 text-sm" onClick={() => request(`/axes/${axis.id}`, {method: 'PATCH', body: JSON.stringify({name: axis.name, values: axis.values})}).then(load)}>Save</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Digests({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
+  const [digests, setDigests] = useState<JsonRecord[]>([]);
+  const load = useCallback(() => request<JsonRecord[]>('/digests').then(setDigests), [request]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  return (
+    <section>
+      <Toolbar>
+        <button className="rounded-md bg-accent px-3 py-2 text-white" onClick={() => request('/digests', {method: 'POST', body: JSON.stringify({period: 'day'})}).then(load)}>Build daily digest</button>
+      </Toolbar>
+      <div className="mt-4 grid gap-3">
+        {digests.map((digest) => <pre key={String(digest.id)} className="overflow-auto rounded-lg border border-line bg-white p-4 text-sm shadow-sm">{JSON.stringify(digest, null, 2)}</pre>)}
+      </div>
+    </section>
+  );
+}
+
+function Telemetry({request}: {request: <T>(path: string) => Promise<T>}) {
+  const [rows, setRows] = useState<JsonRecord[]>([]);
+  useEffect(() => {
+    request<JsonRecord[]>('/telemetry/llm').then(setRows);
+  }, [request]);
+  return <pre className="overflow-auto rounded-lg border border-line bg-white p-4 text-sm shadow-sm">{JSON.stringify(rows, null, 2)}</pre>;
+}
+
+function Toolbar({children}: {children: React.ReactNode}) {
+  return <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-white p-3 shadow-sm">{children}</div>;
+}
+
+export default App;
