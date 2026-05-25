@@ -43,7 +43,7 @@ services:
     build:
       context: .
       dockerfile: apps/server/Dockerfile
-    command: sh -c "npx prisma db push && node dist/worker.js"
+    command: sh -c "node dist/worker.js"
     env_file: .env
     depends_on:
       postgres:

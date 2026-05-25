@@ -1,0 +1,9 @@
+node_modules
+dist
+.git
+.env
+apps/server/dist
+apps/web/dist
+apps/web/tsconfig.tsbuildinfo
+coverage
+*.log

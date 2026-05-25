@@ -1,8 +1,22 @@
 import {PrismaClient} from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
-import {sha256, normalizeUrl} from '../src/common/hash';
+import {createHash} from 'node:crypto';
 
 const prisma = new PrismaClient();
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function normalizeUrl(url: string): string {
+  const parsed = new URL(url);
+  parsed.hash = '';
+  parsed.searchParams.sort();
+  if (parsed.pathname.endsWith('/') && parsed.pathname.length > 1) {
+    parsed.pathname = parsed.pathname.slice(0, -1);
+  }
+  return parsed.toString().toLowerCase();
+}
 
 async function main(): Promise<void> {
   const email = process.env.SEED_DEMO_EMAIL ?? 'demo@example.com';
