@@ -303,6 +303,8 @@ function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
 function ArticleDetail({article, request}: {article: Article; request: <T>(path: string) => Promise<T>}) {
   const [full, setFull] = useState<Article>(article);
   const [entityDetail, setEntityDetail] = useState<EntityDetail | null>(null);
+  const originalUrl = String(full.url ?? '');
+  const canOpenOriginal = /^https?:\/\//u.test(originalUrl) && !originalUrl.includes('demo.local');
   useEffect(() => {
     setEntityDetail(null);
     request<Article>(`/articles/${article.id}`).then(setFull);
@@ -311,7 +313,11 @@ function ArticleDetail({article, request}: {article: Article; request: <T>(path:
     <div className="grid gap-3">
       <h2 className="text-lg font-semibold">{full.title}</h2>
       <p className="text-sm text-slate-700">{full.fullSummary ?? full.summary}</p>
-      <a className="text-sm text-accent" href={String(full.url)} target="_blank">Open original</a>
+      {canOpenOriginal ? (
+        <a className="text-sm text-accent" href={originalUrl} target="_blank">Open original</a>
+      ) : (
+        <span className="text-sm text-slate-500">Original link is unavailable for demo data.</span>
+      )}
       <div className="flex flex-wrap gap-2">
         {(full.mentions ?? []).map(({entity}) => (
           <button

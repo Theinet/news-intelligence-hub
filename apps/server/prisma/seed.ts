@@ -47,31 +47,49 @@ async function main(): Promise<void> {
     }
   });
   const feed = await prisma.feed.upsert({
-    where: {userId_url: {userId: user.id, url: 'https://demo.local/rss.xml'}},
+    where: {userId_url: {userId: user.id, url: 'https://www.theverge.com/rss/index.xml'}},
     update: {},
-    create: {userId: user.id, url: 'https://demo.local/rss.xml', title: 'Demo Tech Feed'}
+    create: {userId: user.id, url: 'https://www.theverge.com/rss/index.xml', title: 'Demo Tech Feed'}
   });
   const demoArticles = [
     {
       title: 'Microsoft ships new AI runtime for developers',
-      url: 'https://demo.local/articles/microsoft-ai-runtime',
+      url: 'https://blogs.microsoft.com/ai/',
       content: 'Microsoft and OpenAI announced a new AI infrastructure runtime for developers. The release focuses on inference efficiency, React tooling, and PostgreSQL-backed observability for enterprise teams building production systems.',
       publishedAt: new Date()
     },
     {
       title: 'EU crypto regulation update mentions Bitcoin and Ethereum',
-      url: 'https://demo.local/articles/eu-crypto-regulation',
+      url: 'https://finance.ec.europa.eu/digital-finance/crypto-assets_en',
       content: 'The European Union published a crypto regulation update that affects Bitcoin and Ethereum projects. Analysts expect compliance teams to watch market impact and reporting obligations through the next quarter.',
       publishedAt: new Date(Date.now() - 2 * 60 * 60 * 1000)
     },
     {
       title: 'Anthropic expands DevTools guidance for AI teams',
-      url: 'https://demo.local/articles/anthropic-devtools',
+      url: 'https://www.anthropic.com/news',
       content: 'Anthropic released guidance for DevTools teams integrating AI assistants into software workflows. The document discusses secure prompt design, evaluation, and production telemetry for senior engineering teams.',
       publishedAt: new Date(Date.now() - 4 * 60 * 60 * 1000)
     }
   ];
   const demoUrls = demoArticles.map((item) => normalizeUrl(item.url));
+  const demoTitles = demoArticles.map((item) => item.title);
+  const staleDemoArticles = await prisma.article.findMany({
+    where: {
+      userId: user.id,
+      title: {in: demoTitles},
+      normalizedUrl: {notIn: demoUrls}
+    },
+    select: {id: true}
+  });
+  await prisma.articleEntity.deleteMany({
+    where: {articleId: {in: staleDemoArticles.map((article) => article.id)}}
+  });
+  await prisma.article.deleteMany({
+    where: {id: {in: staleDemoArticles.map((article) => article.id)}}
+  });
+  await prisma.feed.deleteMany({
+    where: {userId: user.id, url: 'https://demo.local/rss.xml'}
+  });
   const existingDemoArticles = await prisma.article.findMany({
     where: {userId: user.id, normalizedUrl: {in: demoUrls}},
     select: {id: true}
