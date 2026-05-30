@@ -12,9 +12,12 @@ export class GraphService {
       orderBy: {publishedAt: 'desc'},
       take: 150
     });
+    const categoryQuery = query.category?.trim().toLowerCase();
+    const searchQuery = query.q?.trim().toLowerCase();
     const filteredArticles = articles.filter((article) => {
-      const categoryOk = !query.category || (article.categories as string[]).includes(query.category);
-      const searchOk = !query.q || article.title.toLowerCase().includes(query.q.toLowerCase());
+      const categoryOk = !categoryQuery ||
+        (article.categories as string[]).some((category) => category.toLowerCase().includes(categoryQuery));
+      const searchOk = !searchQuery || article.title.toLowerCase().includes(searchQuery);
       return categoryOk && searchOk;
     });
     const entityMap = new Map<string, {id: string; label: string; entityType: string}>();

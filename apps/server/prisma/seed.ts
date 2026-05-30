@@ -18,6 +18,16 @@ function normalizeUrl(url: string): string {
   return parsed.toString().toLowerCase();
 }
 
+function demoCategories(title: string): string[] {
+  if (title.includes('crypto')) {
+    return ['Crypto regulation'];
+  }
+  if (title.includes('DevTools')) {
+    return ['DevTools'];
+  }
+  return ['AI infrastructure'];
+}
+
 async function main(): Promise<void> {
   const email = process.env.SEED_DEMO_EMAIL ?? 'demo@example.com';
   const password = process.env.SEED_DEMO_PASSWORD ?? 'Password123!';
@@ -114,7 +124,7 @@ async function main(): Promise<void> {
         summary: item.content,
         fullSummary: item.content,
         importance: 'high',
-        categories: item.title.includes('crypto') ? ['Crypto regulation'] : ['AI infrastructure'],
+        categories: demoCategories(item.title),
         axes: {Region: item.title.includes('EU') ? 'EU' : 'global', Tone: 'neutral'}
       },
       create: {
@@ -130,7 +140,7 @@ async function main(): Promise<void> {
         summary: item.content,
         fullSummary: item.content,
         importance: 'high',
-        categories: item.title.includes('crypto') ? ['Crypto regulation'] : ['AI infrastructure'],
+        categories: demoCategories(item.title),
         axes: {Region: item.title.includes('EU') ? 'EU' : 'global', Tone: 'neutral'}
       }
     });

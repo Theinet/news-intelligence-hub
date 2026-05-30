@@ -247,56 +247,32 @@ function Verify({request}: {request: <T>(path: string, init?: RequestInit) => Pr
 
 function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
   const [articles, setArticles] = useState<Article[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
   const [selected, setSelected] = useState<Article | null>(null);
   const [filters, setFilters] = useState({category: '', importance: '', status: ''});
-  const categoryMatches = categories.filter((category) => {
-    const query = filters.category.trim().toLowerCase();
-    return query.length > 0 && category.name.toLowerCase().includes(query);
-  }).slice(0, 5);
   const load = useCallback(() => {
-    const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      const trimmedValue = value.trim();
+      if (trimmedValue) {
+        params.append(key, trimmedValue);
+      }
+    });
     request<Article[]>(`/articles?${params}`).then(setArticles);
   }, [filters, request]);
   useEffect(() => {
     void load();
   }, [load]);
-  useEffect(() => {
-    request<Category[]>('/categories').then(setCategories);
-  }, [request]);
 
   return (
     <section className="grid gap-4 lg:grid-cols-[1fr_380px]">
       <div>
         <Toolbar>
-          <div className="relative">
-            <input
-              className="h-10 rounded-md border border-line px-3"
-              list="article-category-options"
-              placeholder="Category"
-              value={filters.category}
-              onChange={(event) => setFilters({...filters, category: event.target.value})}
-            />
-            <datalist id="article-category-options">
-              {categories.map((category) => <option key={category.id} value={category.name} />)}
-            </datalist>
-            {categoryMatches.length > 0 && !categories.some((category) => category.name === filters.category) && (
-              <div className="absolute left-0 top-11 z-10 w-64 rounded-md border border-line bg-white p-1 shadow-lg">
-                {categoryMatches.map((category) => (
-                  <button
-                    key={category.id}
-                    className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-teal-50 hover:text-accent"
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      setFilters({...filters, category: category.name});
-                    }}
-                  >
-                    {category.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <input
+            className="h-10 rounded-md border border-line px-3"
+            placeholder="Category"
+            value={filters.category}
+            onChange={(event) => setFilters({...filters, category: event.target.value})}
+          />
           <select className="h-10 rounded-md border border-line px-3" onChange={(e) => setFilters({...filters, importance: e.target.value})}>
             <option value="">All importance</option>
             <option value="high">Important</option>

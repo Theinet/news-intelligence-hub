@@ -31,12 +31,13 @@ export class ArticlesService {
       orderBy: {publishedAt: 'desc'},
       take: 100
     });
+    const categoryQuery = query.category?.trim().toLowerCase();
     return articles.filter((article) => {
-      if (!query.category) {
+      if (!categoryQuery) {
         return true;
       }
       const categories = article.categories as string[];
-      return categories.includes(query.category);
+      return categories.some((category) => category.toLowerCase().includes(categoryQuery));
     });
   }
 
