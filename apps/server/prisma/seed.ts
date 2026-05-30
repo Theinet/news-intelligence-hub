@@ -71,11 +71,34 @@ async function main(): Promise<void> {
       publishedAt: new Date(Date.now() - 4 * 60 * 60 * 1000)
     }
   ];
+  const demoUrls = demoArticles.map((item) => normalizeUrl(item.url));
+  const existingDemoArticles = await prisma.article.findMany({
+    where: {userId: user.id, normalizedUrl: {in: demoUrls}},
+    select: {id: true}
+  });
+  await prisma.graphEdge.deleteMany({where: {userId: user.id}});
+  await prisma.articleEntity.deleteMany({
+    where: {articleId: {in: existingDemoArticles.map((article) => article.id)}}
+  });
   for (const item of demoArticles) {
     const normalizedUrl = normalizeUrl(item.url);
+    const content = Array.from({length: 5}, () => item.content).join(' ');
     const article = await prisma.article.upsert({
       where: {userId_normalizedUrl: {userId: user.id, normalizedUrl}},
-      update: {},
+      update: {
+        feedId: feed.id,
+        title: item.title,
+        url: item.url,
+        publishedAt: item.publishedAt,
+        content,
+        contentHash: sha256(content),
+        status: 'processed',
+        summary: item.content,
+        fullSummary: item.content,
+        importance: 'high',
+        categories: item.title.includes('crypto') ? ['Crypto regulation'] : ['AI infrastructure'],
+        axes: {Region: item.title.includes('EU') ? 'EU' : 'global', Tone: 'neutral'}
+      },
       create: {
         userId: user.id,
         feedId: feed.id,
@@ -83,8 +106,8 @@ async function main(): Promise<void> {
         url: item.url,
         normalizedUrl,
         publishedAt: item.publishedAt,
-        content: item.content.repeat(5),
-        contentHash: sha256(item.content.repeat(5)),
+        content,
+        contentHash: sha256(content),
         status: 'processed',
         summary: item.content,
         fullSummary: item.content,
