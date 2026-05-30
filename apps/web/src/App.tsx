@@ -17,6 +17,12 @@ const apiUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 type View = 'articles' | 'feeds' | 'graph' | 'settings' | 'digests' | 'telemetry';
 type JsonRecord = Record<string, unknown>;
 
+interface ApiErrorBody {
+  message?: string | string[];
+  error?: string;
+  statusCode?: number;
+}
+
 interface Article extends JsonRecord {
   id: string;
   title: string;
@@ -155,18 +161,19 @@ function AuthScreen(props: {
   const [mode, setMode] = useState<'login' | 'register'>('login');
 
   async function submit() {
+    props.setMessage('');
     const response = await fetch(`${apiUrl}/auth/${mode}`, {
       method: 'POST',
       headers: {'content-type': 'application/json'},
-      body: JSON.stringify({email, password})
+      body: JSON.stringify({email: email.trim(), password})
     });
-    const data = await response.json();
+    const data = await response.json() as ApiErrorBody & {accessToken?: string; devVerifyUrl?: string};
     if (!response.ok) {
-      props.setMessage(JSON.stringify(data));
+      props.setMessage(formatAuthError(data));
       return;
     }
     if (mode === 'login') {
-      props.setToken(data.accessToken);
+      props.setToken(data.accessToken ?? '');
     } else {
       props.setMessage(`DEV MODE verification link: ${data.devVerifyUrl}`);
     }
@@ -177,12 +184,22 @@ function AuthScreen(props: {
       <section className="w-full max-w-md rounded-lg border border-line bg-white p-6 shadow-sm">
         <h1 className="text-2xl font-semibold">News Intelligence Hub</h1>
         <div className="mt-5 grid gap-3">
-          <input className="rounded-md border border-line px-3 py-2" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input
+            className="rounded-md border border-line px-3 py-2"
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              props.setMessage('');
+            }}
+          />
           <input
             className="rounded-md border border-line px-3 py-2"
             type="password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              props.setMessage('');
+            }}
           />
           <button className="rounded-md bg-accent px-4 py-2 text-white" onClick={submit}>
             {mode === 'login' ? 'Login' : 'Register'}
@@ -190,11 +207,26 @@ function AuthScreen(props: {
           <button className="text-left text-sm text-accent" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
             {mode === 'login' ? 'Create account' : 'Use existing account'}
           </button>
-          {props.message && <p className="rounded-md bg-teal-50 p-3 text-sm text-accent">{props.message}</p>}
+          {props.message && (
+            <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {props.message}
+            </p>
+          )}
         </div>
       </section>
     </main>
   );
+}
+
+function formatAuthError(data: ApiErrorBody): string {
+  const message = Array.isArray(data.message) ? data.message.join(', ') : data.message;
+  if (message === 'Bad credentials') {
+    return 'Wrong email or password.';
+  }
+  if (message === 'Email is not verified') {
+    return 'Email is not verified. Use the DEV MODE verification link from registration.';
+  }
+  return message ?? data.error ?? 'Unable to complete authentication.';
 }
 
 function Verify({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
