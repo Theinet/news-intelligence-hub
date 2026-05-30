@@ -1,6 +1,10 @@
 import {Injectable, NotFoundException} from '@nestjs/common';
 import {PrismaService} from '../common/prisma.service';
 
+function categoryMatches(category: string, query: string): boolean {
+  return category.toLowerCase().split(/\s+/).some((word) => word.startsWith(query));
+}
+
 @Injectable()
 export class ArticlesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -37,7 +41,7 @@ export class ArticlesService {
         return true;
       }
       const categories = article.categories as string[];
-      return categories.some((category) => category.toLowerCase().includes(categoryQuery));
+      return categories.some((category) => categoryMatches(category, categoryQuery));
     });
   }
 

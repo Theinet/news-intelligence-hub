@@ -1,6 +1,10 @@
 import {Injectable} from '@nestjs/common';
 import {PrismaService} from '../common/prisma.service';
 
+function categoryMatches(category: string, query: string): boolean {
+  return category.toLowerCase().split(/\s+/).some((word) => word.startsWith(query));
+}
+
 @Injectable()
 export class GraphService {
   constructor(private readonly prisma: PrismaService) {}
@@ -16,7 +20,7 @@ export class GraphService {
     const searchQuery = query.q?.trim().toLowerCase();
     const filteredArticles = articles.filter((article) => {
       const categoryOk = !categoryQuery ||
-        (article.categories as string[]).some((category) => category.toLowerCase().includes(categoryQuery));
+        (article.categories as string[]).some((category) => categoryMatches(category, categoryQuery));
       const searchOk = !searchQuery || article.title.toLowerCase().includes(searchQuery);
       return categoryOk && searchOk;
     });
