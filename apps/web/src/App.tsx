@@ -323,7 +323,22 @@ function ArticleDetail({article, request}: {article: Article; request: <T>(path:
           </button>
         ))}
       </div>
-      <pre className="overflow-auto rounded bg-panel p-3 text-xs">{JSON.stringify(full.axes, null, 2)}</pre>
+      <div className="rounded-md bg-panel p-3">
+        <h3 className="text-xs font-semibold uppercase tracking-normal text-slate-500">Categories</h3>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {full.categories.length > 0 ? full.categories.map((category) => (
+            <span key={category} className="rounded bg-white px-2 py-1 text-xs">{category}</span>
+          )) : <span className="text-xs text-slate-500">None</span>}
+        </div>
+        <h3 className="mt-3 text-xs font-semibold uppercase tracking-normal text-slate-500">Axes</h3>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {Object.entries(full.axes).length > 0 ? Object.entries(full.axes).map(([axis, value]) => (
+            <span key={axis} className="rounded bg-white px-2 py-1 text-xs">
+              {axis}: {value}
+            </span>
+          )) : <span className="text-xs text-slate-500">None</span>}
+        </div>
+      </div>
       {entityDetail && (
         <div className="rounded-md border border-line bg-panel p-3">
           <div className="flex items-start justify-between gap-3">
