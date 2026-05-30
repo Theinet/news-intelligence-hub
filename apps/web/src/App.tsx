@@ -46,6 +46,11 @@ interface Entity extends JsonRecord {
   description?: string;
 }
 
+interface EntityDetail extends Entity {
+  mentions?: Array<{article: {id: string; title: string; publishedAt: string; summary?: string}}>;
+  related?: Array<{entity?: Entity; weight: number}>;
+}
+
 interface Feed extends JsonRecord {
   id: string;
   title?: string;
@@ -297,7 +302,9 @@ function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
 
 function ArticleDetail({article, request}: {article: Article; request: <T>(path: string) => Promise<T>}) {
   const [full, setFull] = useState<Article>(article);
+  const [entityDetail, setEntityDetail] = useState<EntityDetail | null>(null);
   useEffect(() => {
+    setEntityDetail(null);
     request<Article>(`/articles/${article.id}`).then(setFull);
   }, [article.id, request]);
   return (
@@ -306,9 +313,63 @@ function ArticleDetail({article, request}: {article: Article; request: <T>(path:
       <p className="text-sm text-slate-700">{full.fullSummary ?? full.summary}</p>
       <a className="text-sm text-accent" href={String(full.url)} target="_blank">Open original</a>
       <div className="flex flex-wrap gap-2">
-        {(full.mentions ?? []).map(({entity}) => <span key={entity.id} className="rounded bg-slate-100 px-2 py-1 text-xs">{entity.canonicalName} / {entity.type}</span>)}
+        {(full.mentions ?? []).map(({entity}) => (
+          <button
+            key={entity.id}
+            className="rounded bg-slate-100 px-2 py-1 text-left text-xs hover:bg-teal-50 hover:text-accent"
+            onClick={() => request<EntityDetail>(`/entities/${entity.id}`).then(setEntityDetail)}
+          >
+            {entity.canonicalName} / {entity.type}
+          </button>
+        ))}
       </div>
       <pre className="overflow-auto rounded bg-panel p-3 text-xs">{JSON.stringify(full.axes, null, 2)}</pre>
+      {entityDetail && (
+        <div className="rounded-md border border-line bg-panel p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="font-semibold">{entityDetail.canonicalName}</h3>
+              <p className="text-xs uppercase tracking-normal text-slate-500">{entityDetail.type}</p>
+            </div>
+            <span className="rounded bg-white px-2 py-1 text-xs">
+              {entityDetail.mentions?.length ?? 0} mentions
+            </span>
+          </div>
+          {entityDetail.description && (
+            <p className="mt-2 text-sm text-slate-700">{entityDetail.description}</p>
+          )}
+          {(entityDetail.aliases?.length ?? 0) > 0 && (
+            <p className="mt-2 text-xs text-slate-500">
+              Aliases: {entityDetail.aliases.join(', ')}
+            </p>
+          )}
+          {(entityDetail.related?.length ?? 0) > 0 && (
+            <div className="mt-3">
+              <h4 className="text-xs font-semibold uppercase tracking-normal text-slate-500">Related</h4>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {entityDetail.related?.map((item) => item.entity && (
+                  <span key={item.entity.id} className="rounded bg-white px-2 py-1 text-xs">
+                    {item.entity.canonicalName} ({item.weight})
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {(entityDetail.mentions?.length ?? 0) > 0 && (
+            <div className="mt-3">
+              <h4 className="text-xs font-semibold uppercase tracking-normal text-slate-500">Mentioned in</h4>
+              <div className="mt-2 grid gap-2">
+                {entityDetail.mentions?.slice(0, 4).map(({article: mentionedArticle}) => (
+                  <div key={mentionedArticle.id} className="rounded bg-white p-2 text-xs">
+                    <p className="font-medium">{mentionedArticle.title}</p>
+                    <p className="text-slate-500">{new Date(mentionedArticle.publishedAt).toLocaleString()}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
