@@ -7,7 +7,8 @@ import {
   RefreshCw,
   Rss,
   Settings,
-  ShieldCheck
+  ShieldCheck,
+  Trash2
 } from 'lucide-react';
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import ReactFlow, {Background, Controls, Edge, Node} from 'reactflow';
@@ -84,10 +85,11 @@ function App() {
         ...(init.headers ?? {})
       }
     });
+    const text = await response.text();
     if (!response.ok) {
-      throw new Error(await response.text());
+      throw new Error(formatApiErrorText(text));
     }
-    return response.json() as Promise<T>;
+    return (text ? JSON.parse(text) : undefined) as T;
   }, [token]);
 
   useEffect(() => {
@@ -232,6 +234,15 @@ function formatAuthError(data: ApiErrorBody): string {
     return 'Email is not verified. Use the DEV MODE verification link from registration.';
   }
   return message ?? data.error ?? 'Unable to complete authentication.';
+}
+
+function formatApiErrorText(text: string): string {
+  try {
+    const data = JSON.parse(text) as ApiErrorBody;
+    return formatAuthError(data);
+  } catch {
+    return text || 'Request failed.';
+  }
 }
 
 function Verify({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
@@ -409,14 +420,41 @@ function ArticleDetail({article, request}: {article: Article; request: <T>(path:
 function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [url, setUrl] = useState('');
+  const [message, setMessage] = useState<{kind: 'info' | 'error'; text: string} | null>(null);
+  const [busyId, setBusyId] = useState('');
   const load = useCallback(() => request<Feed[]>('/feeds').then(setFeeds), [request]);
   useEffect(() => {
     void load();
   }, [load]);
   async function add() {
-    await request('/feeds', {method: 'POST', body: JSON.stringify({url})});
-    setUrl('');
-    load();
+    setMessage(null);
+    try {
+      await request('/feeds', {method: 'POST', body: JSON.stringify({url})});
+      setUrl('');
+      await load();
+      setMessage({kind: 'info', text: 'Feed added and queued for pulling.'});
+    } catch (error) {
+      setMessage({kind: 'error', text: error instanceof Error ? error.message : 'Unable to add feed.'});
+    }
+  }
+  async function runFeedAction(feedId: string, action: 'pull' | 'pause' | 'resume' | 'delete') {
+    setMessage(null);
+    setBusyId(feedId);
+    try {
+      if (action === 'delete') {
+        await request(`/feeds/${feedId}`, {method: 'DELETE'});
+        setMessage({kind: 'info', text: 'Feed deleted. Existing articles stay in the library.'});
+      } else {
+        const method = action === 'pull' ? 'POST' : 'PATCH';
+        await request(`/feeds/${feedId}/${action}`, {method});
+        setMessage({kind: 'info', text: action === 'pull' ? 'Feed pull queued.' : `Feed ${action}d.`});
+      }
+      await load();
+    } catch (error) {
+      setMessage({kind: 'error', text: error instanceof Error ? error.message : `Unable to ${action} feed.`});
+    } finally {
+      setBusyId('');
+    }
   }
   return (
     <section>
@@ -424,6 +462,13 @@ function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Pro
         <input className="h-10 min-w-72 rounded-md border border-line px-3" placeholder="RSS or Atom URL" value={url} onChange={(e) => setUrl(e.target.value)} />
         <button className="flex h-10 items-center gap-2 rounded-md bg-accent px-3 text-white" onClick={add}><Plus size={16} />Add</button>
       </Toolbar>
+      {message && (
+        <p className={`mt-3 rounded-md px-3 py-2 text-sm ${
+          message.kind === 'error' ? 'bg-red-50 text-red-700' : 'bg-teal-50 text-accent'
+        }`}>
+          {message.text}
+        </p>
+      )}
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         {feeds.map((feed) => (
           <div key={feed.id} className="rounded-lg border border-line bg-white p-4 shadow-sm">
@@ -436,9 +481,37 @@ function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Pro
             </div>
             {feed.lastError && <p className="mt-2 text-sm text-red-700">{feed.lastError}</p>}
             <div className="mt-4 flex flex-wrap gap-2">
-              <button className="rounded-md border border-line px-3 py-2 text-sm" onClick={() => request(`/feeds/${feed.id}/pull`, {method: 'POST'}).then(load)}>Pull</button>
-              <button className="rounded-md border border-line px-3 py-2 text-sm" onClick={() => request(`/feeds/${feed.id}/pause`, {method: 'PATCH'}).then(load)}>Pause</button>
-              <button className="rounded-md border border-line px-3 py-2 text-sm" onClick={() => request(`/feeds/${feed.id}/resume`, {method: 'PATCH'}).then(load)}>Resume</button>
+              <button
+                className="flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm"
+                disabled={busyId === feed.id}
+                onClick={() => void runFeedAction(feed.id, 'pull')}
+              >
+                <RefreshCw size={14} />Pull
+              </button>
+              {feed.status === 'active' ? (
+                <button
+                  className="rounded-md border border-line px-3 py-2 text-sm"
+                  disabled={busyId === feed.id}
+                  onClick={() => void runFeedAction(feed.id, 'pause')}
+                >
+                  Pause
+                </button>
+              ) : (
+                <button
+                  className="rounded-md border border-line px-3 py-2 text-sm"
+                  disabled={busyId === feed.id}
+                  onClick={() => void runFeedAction(feed.id, 'resume')}
+                >
+                  Resume
+                </button>
+              )}
+              <button
+                className="ml-auto flex items-center gap-2 rounded-md border border-red-200 px-3 py-2 text-sm text-red-700"
+                disabled={busyId === feed.id}
+                onClick={() => void runFeedAction(feed.id, 'delete')}
+              >
+                <Trash2 size={14} />Delete
+              </button>
             </div>
           </div>
         ))}

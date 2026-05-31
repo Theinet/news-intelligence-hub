@@ -1,4 +1,5 @@
 import {BadRequestException, Injectable, NotFoundException} from '@nestjs/common';
+import {Feed, Prisma} from '@prisma/client';
 import Parser from 'rss-parser';
 import {PrismaService} from '../common/prisma.service';
 import {QueuesService} from '../jobs/queues.service';
@@ -19,7 +20,7 @@ export class FeedsService {
   async create(userId: string, url: string) {
     let parsedUrl: URL;
     try {
-      parsedUrl = new URL(url);
+      parsedUrl = new URL(url.trim());
     } catch {
       throw new BadRequestException('Invalid URL');
     }
@@ -38,9 +39,17 @@ export class FeedsService {
         `URL is not a reachable RSS/Atom feed: ${error instanceof Error ? error.message : error}`
       );
     }
-    const record = await this.prisma.feed.create({
-      data: {userId, url: parsedUrl.toString(), title}
-    });
+    let record: Feed;
+    try {
+      record = await this.prisma.feed.create({
+        data: {userId, url: parsedUrl.toString(), title}
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new BadRequestException('Feed already exists');
+      }
+      throw error;
+    }
     await this.queues.feedPull.add('feed.pull', {userId, feedId: record.id});
     return record;
   }
