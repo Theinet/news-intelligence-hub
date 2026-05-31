@@ -258,14 +258,21 @@ function Verify({request}: {request: <T>(path: string, init?: RequestInit) => Pr
 
 function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
   const [articles, setArticles] = useState<Article[]>([]);
+  const [feeds, setFeeds] = useState<Feed[]>([]);
   const [selected, setSelected] = useState<Article | null>(null);
-  const [filters, setFilters] = useState({category: '', importance: '', status: ''});
+  const [filters, setFilters] = useState({category: '', feedId: '', importance: '', status: '', from: '', to: ''});
   const load = useCallback(() => {
     const params = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => {
       const trimmedValue = value.trim();
       if (trimmedValue) {
-        params.append(key, trimmedValue);
+        if (key === 'from') {
+          params.append(key, `${trimmedValue}T00:00:00.000Z`);
+        } else if (key === 'to') {
+          params.append(key, `${trimmedValue}T23:59:59.999Z`);
+        } else {
+          params.append(key, trimmedValue);
+        }
       }
     });
     request<Article[]>(`/articles?${params}`).then(setArticles);
@@ -273,6 +280,9 @@ function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    request<Feed[]>('/feeds').then(setFeeds);
+  }, [request]);
 
   return (
     <section className="grid gap-4 lg:grid-cols-[1fr_380px]">
@@ -284,20 +294,55 @@ function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
             value={filters.category}
             onChange={(event) => setFilters({...filters, category: event.target.value})}
           />
-          <select className="h-10 rounded-md border border-line px-3" onChange={(e) => setFilters({...filters, importance: e.target.value})}>
+          <select
+            className="h-10 rounded-md border border-line px-3"
+            value={filters.feedId}
+            onChange={(event) => setFilters({...filters, feedId: event.target.value})}
+          >
+            <option value="">All feeds</option>
+            {feeds.map((feed) => <option key={feed.id} value={feed.id}>{feed.title ?? feed.url}</option>)}
+          </select>
+          <select
+            className="h-10 rounded-md border border-line px-3"
+            value={filters.importance}
+            onChange={(event) => setFilters({...filters, importance: event.target.value})}
+          >
             <option value="">All importance</option>
             <option value="high">Important</option>
             <option value="normal">Normal</option>
             <option value="junk">Junk</option>
           </select>
-          <select className="h-10 rounded-md border border-line px-3" onChange={(e) => setFilters({...filters, status: e.target.value})}>
+          <select
+            className="h-10 rounded-md border border-line px-3"
+            value={filters.status}
+            onChange={(event) => setFilters({...filters, status: event.target.value})}
+          >
             <option value="">All states</option>
             <option value="pending">Pending</option>
             <option value="processed">Processed</option>
             <option value="filtered">Filtered</option>
           </select>
+          <input
+            className="h-10 rounded-md border border-line px-3 text-sm"
+            type="date"
+            value={filters.from}
+            onChange={(event) => setFilters({...filters, from: event.target.value})}
+            title="Published from"
+          />
+          <input
+            className="h-10 rounded-md border border-line px-3 text-sm"
+            type="date"
+            value={filters.to}
+            onChange={(event) => setFilters({...filters, to: event.target.value})}
+            title="Published to"
+          />
         </Toolbar>
         <div className="mt-4 grid gap-3">
+          {articles.length === 0 && (
+            <div className="rounded-lg border border-line bg-white p-4 text-sm text-slate-500 shadow-sm">
+              No articles match the selected filters.
+            </div>
+          )}
           {articles.map((article) => (
             <button key={article.id} className="rounded-lg border border-line bg-white p-4 text-left shadow-sm" onClick={() => setSelected(article)}>
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
