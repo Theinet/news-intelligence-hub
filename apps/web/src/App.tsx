@@ -79,8 +79,17 @@ interface RegenerationRun {
 }
 
 interface Notice {
+  id: string;
   kind: 'info' | 'error';
   text: string;
+}
+
+function makeNotice(kind: Notice['kind'], text: string): Notice {
+  return {
+    id: `${Date.now()}-${Math.random()}`,
+    kind,
+    text
+  };
 }
 
 function App() {
@@ -178,6 +187,7 @@ function Toast({notice}: {notice: Notice | null}) {
   const isError = notice.kind === 'error';
   return (
     <div
+      key={notice.id}
       className={`toast-enter fixed bottom-4 right-4 z-50 w-[calc(100%-2rem)] max-w-sm rounded-lg border bg-white p-4 shadow-lg ${
         isError ? 'border-red-200 text-red-700' : 'border-teal-200 text-accent'
       }`}
@@ -538,9 +548,9 @@ function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Pro
       await request('/feeds', {method: 'POST', body: JSON.stringify({url})});
       setUrl('');
       await load();
-      setMessage({kind: 'info', text: 'Feed added and queued for pulling.'});
+      setMessage(makeNotice('info', 'Feed added and queued for pulling.'));
     } catch (error) {
-      setMessage({kind: 'error', text: error instanceof Error ? error.message : 'Unable to add feed.'});
+      setMessage(makeNotice('error', error instanceof Error ? error.message : 'Unable to add feed.'));
     }
   }
   async function runFeedAction(feedId: string, action: 'pull' | 'pause' | 'resume' | 'delete') {
@@ -549,15 +559,15 @@ function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Pro
     try {
       if (action === 'delete') {
         await request(`/feeds/${feedId}`, {method: 'DELETE'});
-        setMessage({kind: 'info', text: 'Feed deleted. Existing articles stay in the library.'});
+        setMessage(makeNotice('info', 'Feed deleted. Existing articles stay in the library.'));
       } else {
         const method = action === 'pull' ? 'POST' : 'PATCH';
         await request(`/feeds/${feedId}/${action}`, {method});
-        setMessage({kind: 'info', text: action === 'pull' ? 'Feed pull queued.' : `Feed ${action}d.`});
+        setMessage(makeNotice('info', action === 'pull' ? 'Feed pull queued.' : `Feed ${action}d.`));
       }
       await load();
     } catch (error) {
-      setMessage({kind: 'error', text: error instanceof Error ? error.message : `Unable to ${action} feed.`});
+      setMessage(makeNotice('error', error instanceof Error ? error.message : `Unable to ${action} feed.`));
     } finally {
       setBusyId('');
     }
@@ -568,7 +578,7 @@ function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Pro
         <input className="h-10 min-w-72 rounded-md border border-line px-3" placeholder="RSS or Atom URL" value={url} onChange={(e) => setUrl(e.target.value)} />
         <button className="flex h-10 items-center gap-2 rounded-md bg-accent px-3 text-white" onClick={add}><Plus size={16} />Add</button>
       </Toolbar>
-      <Toast notice={message} />
+      <Toast key={message?.id ?? 'feeds-toast'} notice={message} />
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         {feeds.map((feed) => (
           <div key={feed.id} className="rounded-lg border border-line bg-white p-4 shadow-sm">
@@ -819,31 +829,31 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
   async function addCategory() {
     const name = categoryName.trim();
     if (!name) {
-      setMessage({kind: 'error', text: 'Category name is required.'});
+      setMessage(makeNotice('error', 'Category name is required.'));
       return;
     }
     try {
       await request('/categories', {method: 'POST', body: JSON.stringify({name})});
       setCategoryName('');
       await load();
-      setMessage({kind: 'info', text: 'Category added.'});
+      setMessage(makeNotice('info', 'Category added.'));
     } catch (error) {
-      setMessage({kind: 'error', text: errorMessage(error, 'Unable to add category.')});
+      setMessage(makeNotice('error', errorMessage(error, 'Unable to add category.')));
     }
   }
 
   async function saveCategory(category: Category) {
     const name = category.name.trim();
     if (!name) {
-      setMessage({kind: 'error', text: 'Category name is required.'});
+      setMessage(makeNotice('error', 'Category name is required.'));
       return;
     }
     try {
       await request(`/categories/${category.id}`, {method: 'PATCH', body: JSON.stringify({name})});
       await load();
-      setMessage({kind: 'info', text: 'Category saved.'});
+      setMessage(makeNotice('info', 'Category saved.'));
     } catch (error) {
-      setMessage({kind: 'error', text: errorMessage(error, 'Unable to save category.')});
+      setMessage(makeNotice('error', errorMessage(error, 'Unable to save category.')));
     }
   }
 
@@ -851,9 +861,9 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
     try {
       await request(`/categories/${id}`, {method: 'DELETE'});
       await load();
-      setMessage({kind: 'info', text: 'Category deleted.'});
+      setMessage(makeNotice('info', 'Category deleted.'));
     } catch (error) {
-      setMessage({kind: 'error', text: errorMessage(error, 'Unable to delete category.')});
+      setMessage(makeNotice('error', errorMessage(error, 'Unable to delete category.')));
     }
   }
 
@@ -861,7 +871,7 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
     const name = axisName.trim();
     const values = parseCsvValues(axisValues);
     if (!name || values.length === 0) {
-      setMessage({kind: 'error', text: 'Axis name and at least one value are required.'});
+      setMessage(makeNotice('error', 'Axis name and at least one value are required.'));
       return;
     }
     try {
@@ -869,9 +879,9 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
       setAxisName('');
       setAxisValues('');
       await load();
-      setMessage({kind: 'info', text: 'Axis added.'});
+      setMessage(makeNotice('info', 'Axis added.'));
     } catch (error) {
-      setMessage({kind: 'error', text: errorMessage(error, 'Unable to add axis.')});
+      setMessage(makeNotice('error', errorMessage(error, 'Unable to add axis.')));
     }
   }
 
@@ -879,15 +889,15 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
     const name = axis.name.trim();
     const values = axis.values.map((value) => value.trim()).filter(Boolean);
     if (!name || values.length === 0) {
-      setMessage({kind: 'error', text: 'Axis name and at least one value are required.'});
+      setMessage(makeNotice('error', 'Axis name and at least one value are required.'));
       return;
     }
     try {
       await request(`/axes/${axis.id}`, {method: 'PATCH', body: JSON.stringify({name, values})});
       await load();
-      setMessage({kind: 'info', text: 'Axis saved.'});
+      setMessage(makeNotice('info', 'Axis saved.'));
     } catch (error) {
-      setMessage({kind: 'error', text: errorMessage(error, 'Unable to save axis.')});
+      setMessage(makeNotice('error', errorMessage(error, 'Unable to save axis.')));
     }
   }
 
@@ -895,9 +905,9 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
     try {
       await request(`/axes/${id}`, {method: 'DELETE'});
       await load();
-      setMessage({kind: 'info', text: 'Axis deleted.'});
+      setMessage(makeNotice('info', 'Axis deleted.'));
     } catch (error) {
-      setMessage({kind: 'error', text: errorMessage(error, 'Unable to delete axis.')});
+      setMessage(makeNotice('error', errorMessage(error, 'Unable to delete axis.')));
     }
   }
 
@@ -905,14 +915,14 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
     try {
       const run = await request<RegenerationRun>('/regenerations', {method: 'POST'});
       setRegeneration(run);
-      setMessage({kind: 'info', text: 'Regeneration queued.'});
+      setMessage(makeNotice('info', 'Regeneration queued.'));
     } catch (error) {
-      setMessage({kind: 'error', text: errorMessage(error, 'Unable to queue regeneration.')});
+      setMessage(makeNotice('error', errorMessage(error, 'Unable to queue regeneration.')));
     }
   }
   return (
     <section className="grid gap-5">
-      <Toast notice={message} />
+      <Toast key={message?.id ?? 'settings-toast'} notice={message} />
       {regeneration && (
         <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
