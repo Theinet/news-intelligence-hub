@@ -204,6 +204,25 @@ function Toast({notice}: {notice: Notice | null}) {
   );
 }
 
+function LoadingBlock({text}: {text: string}) {
+  return (
+    <div className="rounded-lg border border-line bg-white p-4 text-sm text-slate-500 shadow-sm">
+      {text}
+    </div>
+  );
+}
+
+function ErrorBlock({message, onRetry}: {message: string; onRetry: () => void}) {
+  return (
+    <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 shadow-sm">
+      <p>{message}</p>
+      <button className="mt-3 rounded-md border border-red-200 bg-white px-3 py-2 text-sm" onClick={onRetry}>
+        Retry
+      </button>
+    </div>
+  );
+}
+
 function AuthScreen(props: {
   setToken: (token: string) => void;
   setMessage: (message: string) => void;
@@ -306,6 +325,8 @@ function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
   const [articles, setArticles] = useState<Article[]>([]);
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [selected, setSelected] = useState<Article | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [filters, setFilters] = useState({category: '', feedId: '', importance: '', status: '', timeWindow: ''});
   const load = useCallback(() => {
     const params = new URLSearchParams();
@@ -320,13 +341,22 @@ function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
       params.append('from', range.from);
       params.append('to', range.to);
     }
-    request<Article[]>(`/articles?${params}`).then(setArticles);
+    setLoading(true);
+    setLoadError('');
+    request<Article[]>(`/articles?${params}`)
+      .then((loadedArticles) => {
+        setArticles(loadedArticles);
+      })
+      .catch((error) => {
+        setLoadError(errorMessage(error, 'Unable to load articles.'));
+      })
+      .finally(() => setLoading(false));
   }, [filters, request]);
   useEffect(() => {
     void load();
   }, [load]);
   useEffect(() => {
-    request<Feed[]>('/feeds').then(setFeeds);
+    request<Feed[]>('/feeds').then(setFeeds).catch(() => setFeeds([]));
   }, [request]);
 
   return (
@@ -379,12 +409,14 @@ function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
           </select>
         </Toolbar>
         <div className="mt-4 grid gap-3">
-          {articles.length === 0 && (
+          {loading && <LoadingBlock text="Loading articles..." />}
+          {!loading && loadError && <ErrorBlock message={loadError} onRetry={load} />}
+          {!loading && !loadError && articles.length === 0 && (
             <div className="rounded-lg border border-line bg-white p-4 text-sm text-slate-500 shadow-sm">
               No articles match the selected filters.
             </div>
           )}
-          {articles.map((article) => (
+          {!loading && !loadError && articles.map((article) => (
             <button key={article.id} className="rounded-lg border border-line bg-white p-4 text-left shadow-sm" onClick={() => setSelected(article)}>
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                 <span>{article.feed?.title ?? 'Source'}</span>
@@ -531,7 +563,19 @@ function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Pro
   const [url, setUrl] = useState('');
   const [message, setMessage] = useState<Notice | null>(null);
   const [busyId, setBusyId] = useState('');
-  const load = useCallback(() => request<Feed[]>('/feeds').then(setFeeds), [request]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      setFeeds(await request<Feed[]>('/feeds'));
+    } catch (error) {
+      setLoadError(errorMessage(error, 'Unable to load feeds.'));
+    } finally {
+      setLoading(false);
+    }
+  }, [request]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -579,8 +623,10 @@ function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Pro
         <button className="flex h-10 items-center gap-2 rounded-md bg-accent px-3 text-white" onClick={add}><Plus size={16} />Add</button>
       </Toolbar>
       <Toast key={message?.id ?? 'feeds-toast'} notice={message} />
+      {loading && <div className="mt-4"><LoadingBlock text="Loading feeds..." /></div>}
+      {!loading && loadError && <div className="mt-4"><ErrorBlock message={loadError} onRetry={() => void load()} /></div>}
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        {feeds.map((feed) => (
+        {!loading && !loadError && feeds.map((feed) => (
           <div key={feed.id} className="rounded-lg border border-line bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -636,12 +682,24 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
   const [nodeKind, setNodeKind] = useState('');
   const [category, setCategory] = useState('');
   const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [selectedNode, setSelectedNode] = useState<JsonRecord | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<Article | EntityDetail | null>(null);
-  useEffect(() => {
+  const loadGraph = useCallback(() => {
     const params = new URLSearchParams(Object.entries({nodeKind, category, q: search}).filter(([, value]) => value));
-    request<{nodes: JsonRecord[]; edges: JsonRecord[]}>(`/graph?${params}`).then(setGraph);
+    setLoading(true);
+    setLoadError('');
+    request<{nodes: JsonRecord[]; edges: JsonRecord[]}>(`/graph?${params}`)
+      .then(setGraph)
+      .catch((error) => {
+        setLoadError(errorMessage(error, 'Unable to load graph.'));
+      })
+      .finally(() => setLoading(false));
   }, [category, nodeKind, request, search]);
+  useEffect(() => {
+    loadGraph();
+  }, [loadGraph]);
   useEffect(() => {
     if (selectedNode && !graph.nodes.some((node) => String(node.id) === String(selectedNode.id))) {
       setSelectedNode(null);
@@ -699,17 +757,21 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
           <input className="h-10 rounded-md border border-line px-3" placeholder="Category" value={category} onChange={(e) => setCategory(e.target.value)} />
         </Toolbar>
         <div className="mt-4 h-[680px] overflow-hidden rounded-lg border border-line bg-white">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            fitView
-            nodesConnectable={false}
-            onNodesChange={onNodesChange}
-            onNodeClick={(_, node) => selectNode(node.id)}
-          >
-            <Background />
-            <Controls />
-          </ReactFlow>
+          {loading && <div className="p-4"><LoadingBlock text="Loading graph..." /></div>}
+          {!loading && loadError && <div className="p-4"><ErrorBlock message={loadError} onRetry={loadGraph} /></div>}
+          {!loading && !loadError && (
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              fitView
+              nodesConnectable={false}
+              onNodesChange={onNodesChange}
+              onNodeClick={(_, node) => selectNode(node.id)}
+            >
+              <Background />
+              <Controls />
+            </ReactFlow>
+          )}
         </div>
       </div>
       <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
@@ -802,9 +864,23 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
   const [axisValues, setAxisValues] = useState('');
   const [message, setMessage] = useState<Notice | null>(null);
   const [regeneration, setRegeneration] = useState<RegenerationRun | null>(null);
-  const load = useCallback(() => {
-    request<Category[]>('/categories').then(setCategories);
-    request<Axis[]>('/axes').then(setAxes);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      const [loadedCategories, loadedAxes] = await Promise.all([
+        request<Category[]>('/categories'),
+        request<Axis[]>('/axes')
+      ]);
+      setCategories(loadedCategories);
+      setAxes(loadedAxes);
+    } catch (error) {
+      setLoadError(errorMessage(error, 'Unable to load settings.'));
+    } finally {
+      setLoading(false);
+    }
   }, [request]);
   useEffect(() => {
     void load();
@@ -923,6 +999,8 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
   return (
     <section className="grid gap-5">
       <Toast key={message?.id ?? 'settings-toast'} notice={message} />
+      {loading && <LoadingBlock text="Loading settings..." />}
+      {!loading && loadError && <ErrorBlock message={loadError} onRetry={() => void load()} />}
       {regeneration && (
         <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -942,7 +1020,7 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
           </div>
         </div>
       )}
-      <div className="grid gap-5 lg:grid-cols-2">
+      {!loading && !loadError && <div className="grid gap-5 lg:grid-cols-2">
       <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
         <h2 className="font-semibold">Categories</h2>
         <div className="mt-3 flex gap-2">
@@ -1031,7 +1109,7 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
           ))}
         </div>
       </div>
-      </div>
+      </div>}
     </section>
   );
 }
@@ -1057,17 +1135,44 @@ function errorMessage(error: unknown, fallback: string): string {
 
 function Digests({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
   const [digests, setDigests] = useState<JsonRecord[]>([]);
-  const load = useCallback(() => request<JsonRecord[]>('/digests').then(setDigests), [request]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      setDigests(await request<JsonRecord[]>('/digests'));
+    } catch (error) {
+      setLoadError(errorMessage(error, 'Unable to load digests.'));
+    } finally {
+      setLoading(false);
+    }
+  }, [request]);
   useEffect(() => {
     void load();
   }, [load]);
+  async function buildDailyDigest() {
+    try {
+      await request('/digests', {method: 'POST', body: JSON.stringify({period: 'day'})});
+      await load();
+    } catch (error) {
+      setLoadError(errorMessage(error, 'Unable to build digest.'));
+    }
+  }
   return (
     <section>
       <Toolbar>
-        <button className="rounded-md bg-accent px-3 py-2 text-white" onClick={() => request('/digests', {method: 'POST', body: JSON.stringify({period: 'day'})}).then(load)}>Build daily digest</button>
+        <button className="rounded-md bg-accent px-3 py-2 text-white" onClick={() => void buildDailyDigest()}>Build daily digest</button>
       </Toolbar>
       <div className="mt-4 grid gap-3">
-        {digests.map((digest) => <pre key={String(digest.id)} className="overflow-auto rounded-lg border border-line bg-white p-4 text-sm shadow-sm">{JSON.stringify(digest, null, 2)}</pre>)}
+        {loading && <LoadingBlock text="Loading digests..." />}
+        {!loading && loadError && <ErrorBlock message={loadError} onRetry={() => void load()} />}
+        {!loading && !loadError && digests.length === 0 && (
+          <div className="rounded-lg border border-line bg-white p-4 text-sm text-slate-500 shadow-sm">
+            No digests have been built yet.
+          </div>
+        )}
+        {!loading && !loadError && digests.map((digest) => <pre key={String(digest.id)} className="overflow-auto rounded-lg border border-line bg-white p-4 text-sm shadow-sm">{JSON.stringify(digest, null, 2)}</pre>)}
       </div>
     </section>
   );
@@ -1075,9 +1180,28 @@ function Digests({request}: {request: <T>(path: string, init?: RequestInit) => P
 
 function Telemetry({request}: {request: <T>(path: string) => Promise<T>}) {
   const [rows, setRows] = useState<JsonRecord[]>([]);
-  useEffect(() => {
-    request<JsonRecord[]>('/telemetry/llm').then(setRows);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      setRows(await request<JsonRecord[]>('/telemetry/llm'));
+    } catch (error) {
+      setLoadError(errorMessage(error, 'Unable to load telemetry.'));
+    } finally {
+      setLoading(false);
+    }
   }, [request]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  if (loading) {
+    return <LoadingBlock text="Loading telemetry..." />;
+  }
+  if (loadError) {
+    return <ErrorBlock message={loadError} onRetry={() => void load()} />;
+  }
   return <pre className="overflow-auto rounded-lg border border-line bg-white p-4 text-sm shadow-sm">{JSON.stringify(rows, null, 2)}</pre>;
 }
 
