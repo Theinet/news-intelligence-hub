@@ -587,40 +587,142 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
   const [graph, setGraph] = useState<{nodes: JsonRecord[]; edges: JsonRecord[]}>({nodes: [], edges: []});
   const [nodeKind, setNodeKind] = useState('');
   const [category, setCategory] = useState('');
+  const [selectedNode, setSelectedNode] = useState<JsonRecord | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<Article | EntityDetail | null>(null);
   useEffect(() => {
     const params = new URLSearchParams(Object.entries({nodeKind, category}).filter(([, value]) => value));
     request<{nodes: JsonRecord[]; edges: JsonRecord[]}>(`/graph?${params}`).then(setGraph);
   }, [category, nodeKind, request]);
+  useEffect(() => {
+    if (selectedNode && !graph.nodes.some((node) => String(node.id) === String(selectedNode.id))) {
+      setSelectedNode(null);
+      setSelectedDetail(null);
+    }
+  }, [graph.nodes, selectedNode]);
   const nodes = useMemo<Node[]>(() => graph.nodes.map((node, index) => ({
     id: String(node.id),
     position: {x: (index % 6) * 210, y: Math.floor(index / 6) * 120},
     data: {label: `${node.kind}: ${node.label}`},
     style: {borderColor: node.kind === 'article' ? '#0f766e' : '#64748b'}
   })), [graph.nodes]);
+  const visibleNodeIds = useMemo(() => new Set(nodes.map((node) => node.id)), [nodes]);
   const edges = useMemo<Edge[]>(() => graph.edges.map((edge, index) => ({
     id: `${edge.from}-${edge.to}-${index}`,
     source: String(edge.from),
     target: String(edge.to),
     label: String(edge.kind),
     animated: edge.kind === 'co_mention'
-  })), [graph.edges]);
+  })).filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)), [graph.edges, visibleNodeIds]);
+  function selectNode(nodeId: string) {
+    const rawNode = graph.nodes.find((node) => String(node.id) === nodeId) ?? null;
+    setSelectedNode(rawNode);
+    setSelectedDetail(null);
+    if (!rawNode) {
+      return;
+    }
+    if (rawNode.kind === 'article') {
+      request<Article>(`/articles/${nodeId}`).then(setSelectedDetail);
+    } else if (rawNode.kind === 'entity') {
+      request<EntityDetail>(`/entities/${nodeId}`).then(setSelectedDetail);
+    }
+  }
   return (
-    <section>
-      <Toolbar>
-        <select className="h-10 rounded-md border border-line px-3" onChange={(e) => setNodeKind(e.target.value)}>
-          <option value="">All nodes</option>
-          <option value="article">Articles</option>
-          <option value="entity">Entities</option>
-        </select>
-        <input className="h-10 rounded-md border border-line px-3" placeholder="Category" onChange={(e) => setCategory(e.target.value)} />
-      </Toolbar>
-      <div className="mt-4 h-[680px] overflow-hidden rounded-lg border border-line bg-white">
-        <ReactFlow nodes={nodes} edges={edges} fitView>
-          <Background />
-          <Controls />
-        </ReactFlow>
+    <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
+      <div>
+        <Toolbar>
+          <select className="h-10 rounded-md border border-line px-3" value={nodeKind} onChange={(e) => setNodeKind(e.target.value)}>
+            <option value="">All nodes</option>
+            <option value="article">Articles</option>
+            <option value="entity">Entities</option>
+          </select>
+          <input className="h-10 rounded-md border border-line px-3" placeholder="Category" value={category} onChange={(e) => setCategory(e.target.value)} />
+        </Toolbar>
+        <div className="mt-4 h-[680px] overflow-hidden rounded-lg border border-line bg-white">
+          <ReactFlow nodes={nodes} edges={edges} fitView onNodeClick={(_, node) => selectNode(node.id)}>
+            <Background />
+            <Controls />
+          </ReactFlow>
+        </div>
+      </div>
+      <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
+        {selectedNode ? (
+          <GraphNodeDetails node={selectedNode} detail={selectedDetail} />
+        ) : (
+          <p className="text-sm text-slate-500">Select a graph node.</p>
+        )}
       </div>
     </section>
+  );
+}
+
+function GraphNodeDetails(props: {node: JsonRecord; detail: Article | EntityDetail | null}) {
+  const kind = String(props.node.kind);
+  if (!props.detail) {
+    return (
+      <div className="grid gap-2">
+        <p className="text-xs uppercase tracking-normal text-slate-500">{kind}</p>
+        <h2 className="font-semibold">{String(props.node.label)}</h2>
+        <p className="text-sm text-slate-500">Loading details...</p>
+      </div>
+    );
+  }
+  if (kind === 'article') {
+    const article = props.detail as Article;
+    return (
+      <div className="grid gap-3">
+        <p className="text-xs uppercase tracking-normal text-slate-500">Article</p>
+        <h2 className="font-semibold">{article.title}</h2>
+        <p className="text-sm text-slate-700">{article.fullSummary ?? article.summary}</p>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="rounded bg-slate-100 px-2 py-1">{article.importance}</span>
+          <span className="rounded bg-slate-100 px-2 py-1">{article.status}</span>
+          <span className="rounded bg-slate-100 px-2 py-1">{new Date(article.publishedAt).toLocaleString()}</span>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs">
+          {article.categories.map((category) => <span key={category} className="rounded bg-teal-50 px-2 py-1 text-accent">{category}</span>)}
+        </div>
+        <div className="grid gap-1 text-xs text-slate-600">
+          {(article.mentions ?? []).map(({entity}) => (
+            <span key={entity.id}>{entity.canonicalName} / {entity.type}</span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  const entity = props.detail as EntityDetail;
+  return (
+    <div className="grid gap-3">
+      <p className="text-xs uppercase tracking-normal text-slate-500">Entity</p>
+      <div>
+        <h2 className="font-semibold">{entity.canonicalName}</h2>
+        <p className="text-sm text-slate-500">{titleCase(entity.type)}</p>
+      </div>
+      {entity.description && <p className="text-sm text-slate-700">{entity.description}</p>}
+      {(entity.aliases?.length ?? 0) > 0 && <p className="text-xs text-slate-500">Aliases: {entity.aliases.join(', ')}</p>}
+      {(entity.related?.length ?? 0) > 0 && (
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-normal text-slate-500">Related</h3>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+            {entity.related?.map((item) => item.entity && (
+              <span key={item.entity.id} className="rounded bg-slate-100 px-2 py-1">{item.entity.canonicalName} ({item.weight})</span>
+            ))}
+          </div>
+        </div>
+      )}
+      {(entity.mentions?.length ?? 0) > 0 && (
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-normal text-slate-500">Mentioned in</h3>
+          <div className="mt-2 grid gap-2">
+            {entity.mentions?.slice(0, 5).map(({article}) => (
+              <div key={article.id} className="rounded bg-panel p-2 text-xs">
+                <p className="font-medium">{article.title}</p>
+                <p className="text-slate-500">{new Date(article.publishedAt).toLocaleString()}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
