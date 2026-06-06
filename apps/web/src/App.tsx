@@ -11,7 +11,7 @@ import {
   Trash2
 } from 'lucide-react';
 import {useCallback, useEffect, useMemo, useState} from 'react';
-import ReactFlow, {Background, Controls, Edge, Node} from 'reactflow';
+import ReactFlow, {applyNodeChanges, Background, Controls, Edge, Node, NodeChange} from 'reactflow';
 
 const apiUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
@@ -592,6 +592,7 @@ function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Pro
 
 function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
   const [graph, setGraph] = useState<{nodes: JsonRecord[]; edges: JsonRecord[]}>({nodes: [], edges: []});
+  const [nodes, setNodes] = useState<Node[]>([]);
   const [nodeKind, setNodeKind] = useState('');
   const [category, setCategory] = useState('');
   const [selectedNode, setSelectedNode] = useState<JsonRecord | null>(null);
@@ -606,12 +607,20 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
       setSelectedDetail(null);
     }
   }, [graph.nodes, selectedNode]);
-  const nodes = useMemo<Node[]>(() => graph.nodes.map((node, index) => ({
-    id: String(node.id),
-    position: {x: (index % 6) * 210, y: Math.floor(index / 6) * 120},
-    data: {label: `${node.kind}: ${node.label}`},
-    style: {borderColor: node.kind === 'article' ? '#0f766e' : '#64748b'}
-  })), [graph.nodes]);
+  useEffect(() => {
+    setNodes((currentNodes) => {
+      const positionsById = new Map(currentNodes.map((node) => [node.id, node.position]));
+      return graph.nodes.map((node, index) => {
+        const id = String(node.id);
+        return {
+          id,
+          position: positionsById.get(id) ?? {x: (index % 6) * 210, y: Math.floor(index / 6) * 120},
+          data: {label: `${node.kind}: ${node.label}`},
+          style: {borderColor: node.kind === 'article' ? '#0f766e' : '#64748b'}
+        };
+      });
+    });
+  }, [graph.nodes]);
   const visibleNodeIds = useMemo(() => new Set(nodes.map((node) => node.id)), [nodes]);
   const edges = useMemo<Edge[]>(() => graph.edges.map((edge, index) => ({
     id: `${edge.from}-${edge.to}-${index}`,
@@ -620,6 +629,9 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
     label: String(edge.kind),
     animated: edge.kind === 'co_mention'
   })).filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)), [graph.edges, visibleNodeIds]);
+  const onNodesChange = useCallback((changes: NodeChange[]) => {
+    setNodes((currentNodes) => applyNodeChanges(changes, currentNodes));
+  }, []);
   function selectNode(nodeId: string) {
     const rawNode = graph.nodes.find((node) => String(node.id) === nodeId) ?? null;
     setSelectedNode(rawNode);
@@ -650,6 +662,7 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
             edges={edges}
             fitView
             nodesConnectable={false}
+            onNodesChange={onNodesChange}
             onNodeClick={(_, node) => selectNode(node.id)}
           >
             <Background />
