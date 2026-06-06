@@ -1,4 +1,4 @@
-import {Injectable, NotFoundException} from '@nestjs/common';
+import {BadRequestException, Injectable, NotFoundException} from '@nestjs/common';
 import {PrismaService} from '../common/prisma.service';
 import {QueuesService} from '../jobs/queues.service';
 
@@ -14,7 +14,11 @@ export class SettingsService {
   }
 
   createCategory(userId: string, body: {name: string; description?: string}) {
-    return this.prisma.category.create({data: {userId, ...body}});
+    const data = {
+      name: cleanRequiredText(body.name, 'Category name'),
+      description: body.description?.trim() || undefined
+    };
+    return this.prisma.category.create({data: {userId, ...data}});
   }
 
   async updateCategory(userId: string, id: string, body: {name?: string; description?: string}) {
@@ -22,7 +26,7 @@ export class SettingsService {
     if (!category) {
       throw new NotFoundException('Category not found');
     }
-    return this.prisma.category.update({where: {id}, data: body});
+    return this.prisma.category.update({where: {id}, data: cleanCategoryInput(body)});
   }
 
   async deleteCategory(userId: string, id: string): Promise<void> {
@@ -38,7 +42,11 @@ export class SettingsService {
   }
 
   createAxis(userId: string, body: {name: string; values: string[]}) {
-    return this.prisma.categoryAxis.create({data: {userId, name: body.name, values: body.values}});
+    const data = {
+      name: cleanRequiredText(body.name, 'Axis name'),
+      values: cleanAxisValues(body.values)
+    };
+    return this.prisma.categoryAxis.create({data: {userId, ...data}});
   }
 
   async updateAxis(userId: string, id: string, body: {name?: string; values?: string[]}) {
@@ -46,7 +54,7 @@ export class SettingsService {
     if (!axis) {
       throw new NotFoundException('Axis not found');
     }
-    return this.prisma.categoryAxis.update({where: {id}, data: body});
+    return this.prisma.categoryAxis.update({where: {id}, data: cleanAxisInput(body)});
   }
 
   async deleteAxis(userId: string, id: string): Promise<void> {
@@ -71,4 +79,42 @@ export class SettingsService {
     }
     return run;
   }
+}
+
+function cleanCategoryInput(body: {name?: string; description?: string}): {name?: string; description?: string} {
+  const data: {name?: string; description?: string} = {};
+  if (body.name !== undefined) {
+    data.name = cleanRequiredText(body.name, 'Category name');
+  }
+  if (body.description !== undefined) {
+    data.description = body.description.trim() || undefined;
+  }
+  return data;
+}
+
+function cleanAxisInput(body: {name?: string; values?: string[]}): {name?: string; values?: string[]} {
+  const data: {name?: string; values?: string[]} = {};
+  if (body.name !== undefined) {
+    data.name = cleanRequiredText(body.name, 'Axis name');
+  }
+  if (body.values !== undefined) {
+    data.values = cleanAxisValues(body.values);
+  }
+  return data;
+}
+
+function cleanAxisValues(values: string[]): string[] {
+  const cleanValues = values.map((value) => value.trim()).filter(Boolean);
+  if (cleanValues.length === 0) {
+    throw new BadRequestException('Axis values are required');
+  }
+  return cleanValues;
+}
+
+function cleanRequiredText(value: string, fieldName: string): string {
+  const cleanValue = value.trim();
+  if (!cleanValue) {
+    throw new BadRequestException(`${fieldName} is required`);
+  }
+  return cleanValue;
 }
