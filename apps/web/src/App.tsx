@@ -260,21 +260,20 @@ function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
   const [articles, setArticles] = useState<Article[]>([]);
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [selected, setSelected] = useState<Article | null>(null);
-  const [filters, setFilters] = useState({category: '', feedId: '', importance: '', status: '', from: '', to: ''});
+  const [filters, setFilters] = useState({category: '', feedId: '', importance: '', status: '', timeWindow: ''});
   const load = useCallback(() => {
     const params = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => {
       const trimmedValue = value.trim();
-      if (trimmedValue) {
-        if (key === 'from') {
-          params.append(key, `${trimmedValue}T00:00:00.000Z`);
-        } else if (key === 'to') {
-          params.append(key, `${trimmedValue}T23:59:59.999Z`);
-        } else {
-          params.append(key, trimmedValue);
-        }
+      if (trimmedValue && key !== 'timeWindow') {
+        params.append(key, trimmedValue);
       }
     });
+    const range = timeWindowRange(filters.timeWindow);
+    if (range) {
+      params.append('from', range.from);
+      params.append('to', range.to);
+    }
     request<Article[]>(`/articles?${params}`).then(setArticles);
   }, [filters, request]);
   useEffect(() => {
@@ -322,20 +321,16 @@ function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
             <option value="processed">Processed</option>
             <option value="filtered">Filtered</option>
           </select>
-          <input
-            className="h-10 rounded-md border border-line px-3 text-sm"
-            type="date"
-            value={filters.from}
-            onChange={(event) => setFilters({...filters, from: event.target.value})}
-            title="Published from"
-          />
-          <input
-            className="h-10 rounded-md border border-line px-3 text-sm"
-            type="date"
-            value={filters.to}
-            onChange={(event) => setFilters({...filters, to: event.target.value})}
-            title="Published to"
-          />
+          <select
+            className="h-10 rounded-md border border-line px-3"
+            value={filters.timeWindow}
+            onChange={(event) => setFilters({...filters, timeWindow: event.target.value})}
+          >
+            <option value="">All time</option>
+            <option value="today">Today</option>
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+          </select>
         </Toolbar>
         <div className="mt-4 grid gap-3">
           {articles.length === 0 && (
@@ -365,6 +360,21 @@ function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
       </aside>
     </section>
   );
+}
+
+function timeWindowRange(value: string): {from: string; to: string} | null {
+  const now = new Date();
+  const from = new Date(now);
+  if (value === 'today') {
+    from.setHours(0, 0, 0, 0);
+  } else if (value === '7d') {
+    from.setDate(from.getDate() - 7);
+  } else if (value === '30d') {
+    from.setDate(from.getDate() - 30);
+  } else {
+    return null;
+  }
+  return {from: from.toISOString(), to: now.toISOString()};
 }
 
 function ArticleDetail({article, request}: {article: Article; request: <T>(path: string) => Promise<T>}) {
