@@ -595,12 +595,13 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [nodeKind, setNodeKind] = useState('');
   const [category, setCategory] = useState('');
+  const [search, setSearch] = useState('');
   const [selectedNode, setSelectedNode] = useState<JsonRecord | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<Article | EntityDetail | null>(null);
   useEffect(() => {
-    const params = new URLSearchParams(Object.entries({nodeKind, category}).filter(([, value]) => value));
+    const params = new URLSearchParams(Object.entries({nodeKind, category, q: search}).filter(([, value]) => value));
     request<{nodes: JsonRecord[]; edges: JsonRecord[]}>(`/graph?${params}`).then(setGraph);
-  }, [category, nodeKind, request]);
+  }, [category, nodeKind, request, search]);
   useEffect(() => {
     if (selectedNode && !graph.nodes.some((node) => String(node.id) === String(selectedNode.id))) {
       setSelectedNode(null);
@@ -654,6 +655,7 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
             <option value="article">Articles</option>
             <option value="entity">Entities</option>
           </select>
+          <input className="h-10 rounded-md border border-line px-3" placeholder="Search graph" value={search} onChange={(e) => setSearch(e.target.value)} />
           <input className="h-10 rounded-md border border-line px-3" placeholder="Category" value={category} onChange={(e) => setCategory(e.target.value)} />
         </Toolbar>
         <div className="mt-4 h-[680px] overflow-hidden rounded-lg border border-line bg-white">

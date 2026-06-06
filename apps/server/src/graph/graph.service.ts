@@ -17,7 +17,7 @@ export class GraphService {
     const searchQuery = query.q?.trim().toLowerCase();
     const filteredArticles = articles.filter((article) => {
       const categoryOk = categoryMatchesQuery(article.categories as string[], categoryQuery);
-      const searchOk = !searchQuery || article.title.toLowerCase().includes(searchQuery);
+      const searchOk = !searchQuery || this.articleMatchesSearch(article, searchQuery);
       return categoryOk && searchOk;
     });
     const entityMap = new Map<string, {id: string; label: string; entityType: string}>();
@@ -73,5 +73,28 @@ export class GraphService {
         score: edge.score
       }))
     };
+  }
+
+  private articleMatchesSearch(article: {
+    title: string;
+    summary: string | null;
+    fullSummary: string | null;
+    categories: unknown;
+    mentions: Array<{entity: {canonicalName: string; aliases: unknown}}>;
+  }, searchQuery: string): boolean {
+    const categories = Array.isArray(article.categories) ? article.categories : [];
+    const searchableValues = [
+      article.title,
+      article.summary ?? '',
+      article.fullSummary ?? '',
+      ...categories.map(String)
+    ];
+    for (const mention of article.mentions) {
+      searchableValues.push(mention.entity.canonicalName);
+      if (Array.isArray(mention.entity.aliases)) {
+        searchableValues.push(...mention.entity.aliases.map(String));
+      }
+    }
+    return searchableValues.some((value) => value.toLowerCase().includes(searchQuery));
   }
 }
