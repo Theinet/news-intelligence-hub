@@ -377,6 +377,14 @@ function timeWindowRange(value: string): {from: string; to: string} | null {
   return {from: from.toISOString(), to: now.toISOString()};
 }
 
+function titleCase(value: string): string {
+  return value.length > 0 ? `${value[0].toUpperCase()}${value.slice(1).toLowerCase()}` : value;
+}
+
+function pluralize(count: number, singular: string, plural: string): string {
+  return count === 1 ? singular : plural;
+}
+
 function ArticleDetail({article, request}: {article: Article; request: <T>(path: string) => Promise<T>}) {
   const [full, setFull] = useState<Article>(article);
   const [entityDetail, setEntityDetail] = useState<EntityDetail | null>(null);
@@ -427,10 +435,10 @@ function ArticleDetail({article, request}: {article: Article; request: <T>(path:
           <div className="flex items-start justify-between gap-3">
             <div>
               <h3 className="font-semibold">{entityDetail.canonicalName}</h3>
-              <p className="text-xs uppercase tracking-normal text-slate-500">{entityDetail.type}</p>
+              <p className="text-xs text-slate-500">{titleCase(entityDetail.type)}</p>
             </div>
             <span className="rounded bg-white px-2 py-1 text-xs">
-              {entityDetail.mentions?.length ?? 0} mentions
+              {entityDetail.mentions?.length ?? 0} {pluralize(entityDetail.mentions?.length ?? 0, 'mention', 'mentions')}
             </span>
           </div>
           {entityDetail.description && (
