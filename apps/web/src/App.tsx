@@ -71,6 +71,13 @@ interface Axis {
   values: string[];
 }
 
+interface RegenerationRun {
+  id: string;
+  status: string;
+  total: number;
+  processed: number;
+}
+
 function App() {
   const [token, setToken] = useState(localStorage.getItem('nih_token') ?? '');
   const [view, setView] = useState<View>('articles');
@@ -729,43 +736,259 @@ function GraphNodeDetails(props: {node: JsonRecord; detail: Article | EntityDeta
 function SettingsView({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [axes, setAxes] = useState<Axis[]>([]);
-  const [name, setName] = useState('');
+  const [categoryName, setCategoryName] = useState('');
+  const [axisName, setAxisName] = useState('');
+  const [axisValues, setAxisValues] = useState('');
+  const [message, setMessage] = useState<{kind: 'info' | 'error'; text: string} | null>(null);
+  const [regeneration, setRegeneration] = useState<RegenerationRun | null>(null);
   const load = useCallback(() => {
     request<Category[]>('/categories').then(setCategories);
     request<Axis[]>('/axes').then(setAxes);
   }, [request]);
-  useEffect(load, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  useEffect(() => {
+    if (!regeneration || !['queued', 'running'].includes(regeneration.status)) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      request<RegenerationRun>(`/regenerations/${regeneration.id}`).then(setRegeneration);
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [regeneration, request]);
+
+  async function addCategory() {
+    const name = categoryName.trim();
+    if (!name) {
+      setMessage({kind: 'error', text: 'Category name is required.'});
+      return;
+    }
+    try {
+      await request('/categories', {method: 'POST', body: JSON.stringify({name})});
+      setCategoryName('');
+      await load();
+      setMessage({kind: 'info', text: 'Category added.'});
+    } catch (error) {
+      setMessage({kind: 'error', text: errorMessage(error, 'Unable to add category.')});
+    }
+  }
+
+  async function saveCategory(category: Category) {
+    const name = category.name.trim();
+    if (!name) {
+      setMessage({kind: 'error', text: 'Category name is required.'});
+      return;
+    }
+    try {
+      await request(`/categories/${category.id}`, {method: 'PATCH', body: JSON.stringify({name})});
+      await load();
+      setMessage({kind: 'info', text: 'Category saved.'});
+    } catch (error) {
+      setMessage({kind: 'error', text: errorMessage(error, 'Unable to save category.')});
+    }
+  }
+
+  async function deleteCategory(id: string) {
+    try {
+      await request(`/categories/${id}`, {method: 'DELETE'});
+      await load();
+      setMessage({kind: 'info', text: 'Category deleted.'});
+    } catch (error) {
+      setMessage({kind: 'error', text: errorMessage(error, 'Unable to delete category.')});
+    }
+  }
+
+  async function addAxis() {
+    const name = axisName.trim();
+    const values = parseCsvValues(axisValues);
+    if (!name || values.length === 0) {
+      setMessage({kind: 'error', text: 'Axis name and at least one value are required.'});
+      return;
+    }
+    try {
+      await request('/axes', {method: 'POST', body: JSON.stringify({name, values})});
+      setAxisName('');
+      setAxisValues('');
+      await load();
+      setMessage({kind: 'info', text: 'Axis added.'});
+    } catch (error) {
+      setMessage({kind: 'error', text: errorMessage(error, 'Unable to add axis.')});
+    }
+  }
+
+  async function saveAxis(axis: Axis) {
+    const name = axis.name.trim();
+    const values = axis.values.map((value) => value.trim()).filter(Boolean);
+    if (!name || values.length === 0) {
+      setMessage({kind: 'error', text: 'Axis name and at least one value are required.'});
+      return;
+    }
+    try {
+      await request(`/axes/${axis.id}`, {method: 'PATCH', body: JSON.stringify({name, values})});
+      await load();
+      setMessage({kind: 'info', text: 'Axis saved.'});
+    } catch (error) {
+      setMessage({kind: 'error', text: errorMessage(error, 'Unable to save axis.')});
+    }
+  }
+
+  async function deleteAxis(id: string) {
+    try {
+      await request(`/axes/${id}`, {method: 'DELETE'});
+      await load();
+      setMessage({kind: 'info', text: 'Axis deleted.'});
+    } catch (error) {
+      setMessage({kind: 'error', text: errorMessage(error, 'Unable to delete axis.')});
+    }
+  }
+
   async function regenerate() {
-    await request('/regenerations', {method: 'POST'});
-    load();
+    try {
+      const run = await request<RegenerationRun>('/regenerations', {method: 'POST'});
+      setRegeneration(run);
+      setMessage({kind: 'info', text: 'Regeneration queued.'});
+    } catch (error) {
+      setMessage({kind: 'error', text: errorMessage(error, 'Unable to queue regeneration.')});
+    }
   }
   return (
-    <section className="grid gap-5 lg:grid-cols-2">
+    <section className="grid gap-5">
+      {message && (
+        <p className={`rounded-md px-3 py-2 text-sm ${
+          message.kind === 'error' ? 'bg-red-50 text-red-700' : 'bg-teal-50 text-accent'
+        }`}>{message.text}</p>
+      )}
+      {regeneration && (
+        <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold">Regeneration</h2>
+              <p className="text-sm text-slate-500">
+                {regeneration.status} · {regeneration.processed} of {regeneration.total} articles
+              </p>
+            </div>
+            <span className="rounded bg-slate-100 px-2 py-1 text-xs">{regeneration.id}</span>
+          </div>
+          <div className="mt-3 h-2 overflow-hidden rounded bg-slate-100">
+            <div
+              className="h-full bg-accent"
+              style={{width: `${progressPercent(regeneration)}%`}}
+            />
+          </div>
+        </div>
+      )}
+      <div className="grid gap-5 lg:grid-cols-2">
       <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
         <h2 className="font-semibold">Categories</h2>
         <div className="mt-3 flex gap-2">
-          <input className="h-10 flex-1 rounded-md border border-line px-3" value={name} onChange={(e) => setName(e.target.value)} />
-          <button className="rounded-md bg-accent px-3 text-white" onClick={() => request('/categories', {method: 'POST', body: JSON.stringify({name})}).then(load)}>Add</button>
+          <input
+            className="h-10 flex-1 rounded-md border border-line px-3"
+            placeholder="New category"
+            value={categoryName}
+            onChange={(event) => setCategoryName(event.target.value)}
+          />
+          <button className="flex h-10 items-center gap-2 rounded-md bg-accent px-3 text-white" onClick={() => void addCategory()}>
+            <Plus size={16} />Add
+          </button>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">{categories.map((item) => <span key={item.id} className="rounded bg-teal-50 px-2 py-1 text-sm text-accent">{item.name}</span>)}</div>
+        <div className="mt-4 grid gap-2">
+          {categories.map((category) => (
+            <div key={category.id} className="flex flex-wrap items-center gap-2 rounded-md bg-panel p-2">
+              <input
+                className="h-9 min-w-52 flex-1 rounded border border-line px-2"
+                value={category.name}
+                onChange={(event) => setCategories(categories.map((item) => (
+                  item.id === category.id ? {...item, name: event.target.value} : item
+                )))}
+              />
+              <button className="rounded border border-line px-3 py-2 text-sm" onClick={() => void saveCategory(category)}>
+                Save
+              </button>
+              <button
+                className="flex items-center gap-2 rounded border border-red-200 px-3 py-2 text-sm text-red-700"
+                onClick={() => void deleteCategory(category.id)}
+              >
+                <Trash2 size={14} />Delete
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
       <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-semibold">Categorization axes</h2>
           <button className="flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm" onClick={regenerate}><RefreshCw size={16} />Regenerate</button>
         </div>
+        <div className="mt-3 grid gap-2 rounded-md border border-line p-3">
+          <input
+            className="h-10 rounded-md border border-line px-3"
+            placeholder="New axis"
+            value={axisName}
+            onChange={(event) => setAxisName(event.target.value)}
+          />
+          <input
+            className="h-10 rounded-md border border-line px-3"
+            placeholder="Values, comma separated"
+            value={axisValues}
+            onChange={(event) => setAxisValues(event.target.value)}
+          />
+          <button className="flex h-10 w-fit items-center gap-2 rounded-md bg-accent px-3 text-white" onClick={() => void addAxis()}>
+            <Plus size={16} />Add axis
+          </button>
+        </div>
         <div className="mt-3 grid gap-3">
           {axes.map((axis) => (
             <div key={axis.id} className="rounded-md bg-panel p-3">
-              <input className="w-full rounded border border-line px-2 py-1" value={axis.name} onChange={(e) => setAxes(axes.map((item) => item.id === axis.id ? {...item, name: e.target.value} : item))} />
-              <input className="mt-2 w-full rounded border border-line px-2 py-1" value={axis.values.join(', ')} onChange={(e) => setAxes(axes.map((item) => item.id === axis.id ? {...item, values: e.target.value.split(',').map((value) => value.trim())} : item))} />
-              <button className="mt-2 rounded border border-line px-3 py-1 text-sm" onClick={() => request(`/axes/${axis.id}`, {method: 'PATCH', body: JSON.stringify({name: axis.name, values: axis.values})}).then(load)}>Save</button>
+              <input
+                className="w-full rounded border border-line px-2 py-1"
+                value={axis.name}
+                onChange={(event) => setAxes(axes.map((item) => (
+                  item.id === axis.id ? {...item, name: event.target.value} : item
+                )))}
+              />
+              <input
+                className="mt-2 w-full rounded border border-line px-2 py-1"
+                value={axis.values.join(', ')}
+                onChange={(event) => setAxes(axes.map((item) => (
+                  item.id === axis.id ? {...item, values: parseEditableCsvValues(event.target.value)} : item
+                )))}
+              />
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button className="rounded border border-line px-3 py-1 text-sm" onClick={() => void saveAxis(axis)}>Save</button>
+                <button
+                  className="flex items-center gap-2 rounded border border-red-200 px-3 py-1 text-sm text-red-700"
+                  onClick={() => void deleteAxis(axis.id)}
+                >
+                  <Trash2 size={14} />Delete
+                </button>
+              </div>
             </div>
           ))}
         </div>
       </div>
+      </div>
     </section>
   );
+}
+
+function parseCsvValues(value: string): string[] {
+  return value.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function parseEditableCsvValues(value: string): string[] {
+  return value.split(',').map((item) => item.trim());
+}
+
+function progressPercent(run: RegenerationRun): number {
+  if (run.total <= 0) {
+    return run.status === 'done' ? 100 : 0;
+  }
+  return Math.min(100, Math.round((run.processed / run.total) * 100));
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function Digests({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
