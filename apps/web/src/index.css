@@ -32,3 +32,33 @@ body {
   opacity: 0.75;
   pointer-events: none;
 }
+
+.toast-enter {
+  animation: toast-slide-in 180ms ease-out;
+}
+
+.toast-progress {
+  animation: toast-progress 4s linear forwards;
+}
+
+@keyframes toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toast-progress {
+  from {
+    width: 100%;
+  }
+
+  to {
+    width: 0%;
+  }
+}

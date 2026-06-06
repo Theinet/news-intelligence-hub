@@ -78,6 +78,11 @@ interface RegenerationRun {
   processed: number;
 }
 
+interface Notice {
+  kind: 'info' | 'error';
+  text: string;
+}
+
 function App() {
   const [token, setToken] = useState(localStorage.getItem('nih_token') ?? '');
   const [view, setView] = useState<View>('articles');
@@ -161,6 +166,30 @@ function App() {
         {view === 'digests' && <Digests request={request} />}
         {view === 'telemetry' && <Telemetry request={request} />}
       </main>
+    </div>
+  );
+}
+
+function Toast({notice}: {notice: Notice | null}) {
+  if (!notice) {
+    return null;
+  }
+
+  const isError = notice.kind === 'error';
+  return (
+    <div
+      className={`toast-enter fixed bottom-4 right-4 z-50 w-[calc(100%-2rem)] max-w-sm rounded-lg border bg-white p-4 shadow-lg ${
+        isError ? 'border-red-200 text-red-700' : 'border-teal-200 text-accent'
+      }`}
+      role={isError ? 'alert' : 'status'}
+    >
+      <div className="flex items-start gap-3">
+        <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${isError ? 'bg-red-500' : 'bg-accent'}`} />
+        <p className="text-sm font-medium">{notice.text}</p>
+      </div>
+      <div className="mt-3 h-1 overflow-hidden rounded-full bg-slate-100">
+        <div className="toast-progress h-full rounded-full bg-current" />
+      </div>
     </div>
   );
 }
@@ -490,12 +519,19 @@ function ArticleDetail({article, request}: {article: Article; request: <T>(path:
 function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [url, setUrl] = useState('');
-  const [message, setMessage] = useState<{kind: 'info' | 'error'; text: string} | null>(null);
+  const [message, setMessage] = useState<Notice | null>(null);
   const [busyId, setBusyId] = useState('');
   const load = useCallback(() => request<Feed[]>('/feeds').then(setFeeds), [request]);
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    if (!message) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setMessage(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
   async function add() {
     setMessage(null);
     try {
@@ -532,13 +568,7 @@ function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Pro
         <input className="h-10 min-w-72 rounded-md border border-line px-3" placeholder="RSS or Atom URL" value={url} onChange={(e) => setUrl(e.target.value)} />
         <button className="flex h-10 items-center gap-2 rounded-md bg-accent px-3 text-white" onClick={add}><Plus size={16} />Add</button>
       </Toolbar>
-      {message && (
-        <p className={`mt-3 rounded-md px-3 py-2 text-sm ${
-          message.kind === 'error' ? 'bg-red-50 text-red-700' : 'bg-teal-50 text-accent'
-        }`}>
-          {message.text}
-        </p>
-      )}
+      <Toast notice={message} />
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         {feeds.map((feed) => (
           <div key={feed.id} className="rounded-lg border border-line bg-white p-4 shadow-sm">
@@ -760,7 +790,7 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
   const [categoryName, setCategoryName] = useState('');
   const [axisName, setAxisName] = useState('');
   const [axisValues, setAxisValues] = useState('');
-  const [message, setMessage] = useState<{kind: 'info' | 'error'; text: string} | null>(null);
+  const [message, setMessage] = useState<Notice | null>(null);
   const [regeneration, setRegeneration] = useState<RegenerationRun | null>(null);
   const load = useCallback(() => {
     request<Category[]>('/categories').then(setCategories);
@@ -769,6 +799,13 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    if (!message) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setMessage(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
   useEffect(() => {
     if (!regeneration || !['queued', 'running'].includes(regeneration.status)) {
       return undefined;
@@ -875,11 +912,7 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
   }
   return (
     <section className="grid gap-5">
-      {message && (
-        <p className={`rounded-md px-3 py-2 text-sm ${
-          message.kind === 'error' ? 'bg-red-50 text-red-700' : 'bg-teal-50 text-accent'
-        }`}>{message.text}</p>
-      )}
+      <Toast notice={message} />
       {regeneration && (
         <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
