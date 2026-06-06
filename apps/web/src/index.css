@@ -23,3 +23,7 @@ body {
   font-size: 12px;
   max-width: 180px;
 }
+
+.react-flow__handle {
+  display: none;
+}

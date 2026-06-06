@@ -645,7 +645,13 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
           <input className="h-10 rounded-md border border-line px-3" placeholder="Category" value={category} onChange={(e) => setCategory(e.target.value)} />
         </Toolbar>
         <div className="mt-4 h-[680px] overflow-hidden rounded-lg border border-line bg-white">
-          <ReactFlow nodes={nodes} edges={edges} fitView onNodeClick={(_, node) => selectNode(node.id)}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            fitView
+            nodesConnectable={false}
+            onNodeClick={(_, node) => selectNode(node.id)}
+          >
             <Background />
             <Controls />
           </ReactFlow>
