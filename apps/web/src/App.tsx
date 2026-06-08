@@ -78,6 +78,30 @@ interface RegenerationRun {
   processed: number;
 }
 
+interface DigestCount {
+  name: string;
+  count: number;
+}
+
+interface DigestArticle {
+  id: string;
+  title: string;
+  summary?: string | null;
+}
+
+interface Digest extends JsonRecord {
+  id: string;
+  status: string;
+  period: string;
+  topEntities: DigestCount[];
+  topCategories: DigestCount[];
+  keyArticles: DigestArticle[];
+  summary?: string | null;
+  error?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface Notice {
   id: string;
   kind: 'info' | 'error';
@@ -1164,35 +1188,56 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 function Digests({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
-  const [digests, setDigests] = useState<JsonRecord[]>([]);
+  const [digests, setDigests] = useState<Digest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [building, setBuilding] = useState(false);
   const [loadError, setLoadError] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (showLoading = true) => {
+    if (showLoading) {
+      setLoading(true);
+    }
     setLoadError('');
     try {
-      setDigests(await request<JsonRecord[]>('/digests'));
+      setDigests(await request<Digest[]>('/digests'));
     } catch (error) {
       setLoadError(errorMessage(error, 'Unable to load digests.'));
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   }, [request]);
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    if (!digests.some((digest) => digest.status === 'queued')) {
+      return;
+    }
+    const timer = window.setTimeout(() => void load(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [digests, load]);
   async function buildDailyDigest() {
+    setBuilding(true);
     try {
       await request('/digests', {method: 'POST', body: JSON.stringify({period: 'day'})});
-      await load();
+      await load(false);
     } catch (error) {
       setLoadError(errorMessage(error, 'Unable to build digest.'));
+    } finally {
+      setBuilding(false);
     }
   }
   return (
     <section>
       <Toolbar>
-        <button className="rounded-md bg-accent px-3 py-2 text-white" onClick={() => void buildDailyDigest()}>Build daily digest</button>
+        <button
+          className="rounded-md bg-accent px-3 py-2 text-white disabled:opacity-60"
+          disabled={building}
+          onClick={() => void buildDailyDigest()}
+        >
+          {building ? 'Building...' : 'Build daily digest'}
+        </button>
       </Toolbar>
       <div className="mt-4 grid gap-3">
         {loading && <LoadingBlock text="Loading digests..." />}
@@ -1202,10 +1247,83 @@ function Digests({request}: {request: <T>(path: string, init?: RequestInit) => P
             No digests have been built yet.
           </div>
         )}
-        {!loading && !loadError && digests.map((digest) => <pre key={String(digest.id)} className="overflow-auto rounded-lg border border-line bg-white p-4 text-sm shadow-sm">{JSON.stringify(digest, null, 2)}</pre>)}
+        {!loading && !loadError && digests.map((digest) => <DigestCard key={digest.id} digest={digest} />)}
       </div>
     </section>
   );
+}
+
+function DigestCard({digest}: {digest: Digest}) {
+  const topEntities = Array.isArray(digest.topEntities) ? digest.topEntities : [];
+  const topCategories = Array.isArray(digest.topCategories) ? digest.topCategories : [];
+  const keyArticles = Array.isArray(digest.keyArticles) ? digest.keyArticles : [];
+  return (
+    <article className="rounded-lg border border-line bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span className="rounded bg-slate-100 px-2 py-1">{digestStatusLabel(digest.status)}</span>
+            <span className="rounded bg-slate-100 px-2 py-1">{titleCase(digest.period)}</span>
+            <span>{new Date(digest.createdAt).toLocaleString()}</span>
+          </div>
+          <h2 className="mt-2 text-lg font-semibold">Daily news digest</h2>
+        </div>
+      </div>
+      {digest.status === 'queued' && (
+        <p className="mt-3 rounded bg-teal-50 p-3 text-sm text-accent">
+          Digest is queued. The page will refresh it automatically.
+        </p>
+      )}
+      {digest.status === 'error' && (
+        <p className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {digest.error ?? 'Digest build failed.'}
+        </p>
+      )}
+      {digest.summary && <p className="mt-3 text-sm text-slate-700">{digest.summary}</p>}
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <DigestCountList title="Top entities" items={topEntities} emptyText="No entities in this period." />
+        <DigestCountList title="Top categories" items={topCategories} emptyText="No categories in this period." />
+      </div>
+      <div className="mt-4">
+        <h3 className="text-xs font-semibold uppercase tracking-normal text-slate-500">Key articles</h3>
+        <div className="mt-2 grid gap-2">
+          {keyArticles.length === 0 && <p className="text-sm text-slate-500">No key articles in this period.</p>}
+          {keyArticles.map((article) => (
+            <div key={article.id} className="rounded bg-panel p-3 text-sm">
+              <p className="font-medium">{article.title}</p>
+              {article.summary && <p className="mt-1 line-clamp-2 text-slate-600">{article.summary}</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function DigestCountList(props: {title: string; items: DigestCount[]; emptyText: string}) {
+  return (
+    <div>
+      <h3 className="text-xs font-semibold uppercase tracking-normal text-slate-500">{props.title}</h3>
+      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+        {props.items.length === 0 && <p className="text-sm text-slate-500">{props.emptyText}</p>}
+        {props.items.map((item) => (
+          <span key={item.name} className="rounded bg-slate-100 px-2 py-1">
+            {item.name} ({item.count})
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function digestStatusLabel(status: string): string {
+  if (status === 'ready') {
+    return 'Ready';
+  }
+  if (status === 'error') {
+    return 'Error';
+  }
+  return 'Queued';
 }
 
 function Telemetry({request}: {request: <T>(path: string) => Promise<T>}) {
