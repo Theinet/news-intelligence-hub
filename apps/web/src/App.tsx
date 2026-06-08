@@ -1,6 +1,7 @@
 import {
   Activity,
   BookOpen,
+  Eye,
   GitBranch,
   LogOut,
   Plus,
@@ -278,6 +279,7 @@ function AuthScreen(props: {
   const [email, setEmail] = useState('demo@example.com');
   const [password, setPassword] = useState('Password123!');
   const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [showPassword, setShowPassword] = useState(false);
   const isLogin = mode === 'login';
 
   async function submit() {
@@ -327,15 +329,35 @@ function AuthScreen(props: {
               props.setMessage('');
             }}
           />
-          <input
-            className="rounded-md border border-line px-3 py-2"
-            type="password"
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value);
-              props.setMessage('');
-            }}
-          />
+          <div className="relative">
+            <input
+              className="w-full rounded-md border border-line px-3 py-2 pr-12"
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                props.setMessage('');
+              }}
+            />
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full border border-line bg-white text-slate-600 hover:text-accent"
+              title="Hold to show password"
+              aria-label="Hold to show password"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setShowPassword(true);
+              }}
+              onMouseUp={() => setShowPassword(false)}
+              onMouseLeave={() => setShowPassword(false)}
+              onTouchStart={() => setShowPassword(true)}
+              onTouchEnd={() => setShowPassword(false)}
+              onTouchCancel={() => setShowPassword(false)}
+              onBlur={() => setShowPassword(false)}
+            >
+              <Eye size={16} />
+            </button>
+          </div>
           <button className="rounded-md bg-accent px-4 py-2 text-white" onClick={submit}>
             {isLogin ? 'Login' : 'Register'}
           </button>
