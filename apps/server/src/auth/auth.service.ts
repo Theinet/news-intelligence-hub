@@ -1,5 +1,6 @@
-import {BadRequestException, Injectable, UnauthorizedException} from '@nestjs/common';
+import {BadRequestException, ConflictException, Injectable, UnauthorizedException} from '@nestjs/common';
 import {JwtService} from '@nestjs/jwt';
+import {Prisma} from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import {randomBytes} from 'node:crypto';
 import {PrismaService} from '../common/prisma.service';
@@ -20,26 +21,35 @@ export class AuthService {
   ) {}
 
   async register(email: string, password: string): Promise<{devVerifyUrl: string}> {
-    if (!email.includes('@') || password.length < 8) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail.includes('@') || password.length < 8) {
       throw new BadRequestException('Email and password are invalid');
     }
     const passwordHash = await bcrypt.hash(password, 12);
     const verificationToken = randomBytes(24).toString('hex');
-    const user = await this.prisma.user.create({
-      data: {
-        email: email.toLowerCase(),
-        passwordHash,
-        verificationToken,
-        axes: {create: defaultAxes},
-        categories: {
-          create: [
-            {name: 'AI infrastructure'},
-            {name: 'Crypto regulation'},
-            {name: 'DevTools'}
-          ]
+    let user: {id: string};
+    try {
+      user = await this.prisma.user.create({
+        data: {
+          email: normalizedEmail,
+          passwordHash,
+          verificationToken,
+          axes: {create: defaultAxes},
+          categories: {
+            create: [
+              {name: 'AI infrastructure'},
+              {name: 'Crypto regulation'},
+              {name: 'DevTools'}
+            ]
+          }
         }
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Account already exists');
       }
-    });
+      throw error;
+    }
     const frontend = process.env.FRONTEND_URL ?? 'http://localhost:5173';
     const devVerifyUrl = `${frontend}/verify?token=${verificationToken}`;
     console.log(JSON.stringify({

@@ -409,6 +409,9 @@ function formatAuthError(data: ApiErrorBody): string {
   if (message === 'Email is not verified') {
     return 'Email is not verified. Use the DEV MODE verification link from registration.';
   }
+  if (message === 'Account already exists') {
+    return 'Account already exists. Use existing account.';
+  }
   return message ?? data.error ?? 'Unable to complete authentication.';
 }
 
