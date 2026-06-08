@@ -278,6 +278,7 @@ function AuthScreen(props: {
   const [email, setEmail] = useState('demo@example.com');
   const [password, setPassword] = useState('Password123!');
   const [mode, setMode] = useState<'login' | 'register'>('login');
+  const isLogin = mode === 'login';
 
   async function submit() {
     props.setMessage('');
@@ -302,6 +303,21 @@ function AuthScreen(props: {
     <main className="mx-auto grid min-h-screen max-w-5xl place-items-center px-4">
       <section className="w-full max-w-md rounded-lg border border-line bg-white p-6 shadow-sm">
         <h1 className="text-2xl font-semibold">News Intelligence Hub</h1>
+        <div className="mt-4 rounded-md border border-teal-100 bg-teal-50 px-3 py-2">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-accent">
+              {isLogin ? 'Sign in to your account' : 'Create a new account'}
+            </h2>
+            <span className="rounded bg-white px-2 py-1 text-xs font-medium text-accent">
+              {isLogin ? 'Login' : 'Registration'}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-slate-600">
+            {isLogin
+              ? 'Use verified credentials to open your news workspace.'
+              : 'Register first, then confirm the DEV MODE email link.'}
+          </p>
+        </div>
         <div className="mt-5 grid gap-3">
           <input
             className="rounded-md border border-line px-3 py-2"
@@ -321,10 +337,10 @@ function AuthScreen(props: {
             }}
           />
           <button className="rounded-md bg-accent px-4 py-2 text-white" onClick={submit}>
-            {mode === 'login' ? 'Login' : 'Register'}
+            {isLogin ? 'Login' : 'Register'}
           </button>
-          <button className="text-left text-sm text-accent" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
-            {mode === 'login' ? 'Create account' : 'Use existing account'}
+          <button className="text-left text-sm text-accent" onClick={() => setMode(isLogin ? 'register' : 'login')}>
+            {isLogin ? 'Create account' : 'Use existing account'}
           </button>
           {props.message && (
             <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
