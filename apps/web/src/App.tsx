@@ -102,6 +102,25 @@ interface Digest extends JsonRecord {
   updatedAt: string;
 }
 
+interface TelemetrySums {
+  calls?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
+}
+
+interface TelemetryCounts {
+  _all?: number | null;
+}
+
+interface TelemetryRow extends JsonRecord {
+  operation: string;
+  provider: string;
+  model: string;
+  _sum: TelemetrySums;
+  _count: TelemetryCounts;
+}
+
 interface Notice {
   id: string;
   kind: 'info' | 'error';
@@ -1327,14 +1346,14 @@ function digestStatusLabel(status: string): string {
 }
 
 function Telemetry({request}: {request: <T>(path: string) => Promise<T>}) {
-  const [rows, setRows] = useState<JsonRecord[]>([]);
+  const [rows, setRows] = useState<TelemetryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError('');
     try {
-      setRows(await request<JsonRecord[]>('/telemetry/llm'));
+      setRows(await request<TelemetryRow[]>('/telemetry/llm'));
     } catch (error) {
       setLoadError(errorMessage(error, 'Unable to load telemetry.'));
     } finally {
@@ -1350,11 +1369,74 @@ function Telemetry({request}: {request: <T>(path: string) => Promise<T>}) {
   if (loadError) {
     return <ErrorBlock message={loadError} onRetry={() => void load()} />;
   }
-  return <pre className="overflow-auto rounded-lg border border-line bg-white p-4 text-sm shadow-sm">{JSON.stringify(rows, null, 2)}</pre>;
+  const totals = rows.reduce(
+    (accumulator, row) => ({
+      calls: accumulator.calls + (row._sum.calls ?? 0),
+      inputTokens: accumulator.inputTokens + (row._sum.inputTokens ?? 0),
+      outputTokens: accumulator.outputTokens + (row._sum.outputTokens ?? 0),
+      totalTokens: accumulator.totalTokens + (row._sum.totalTokens ?? 0)
+    }),
+    {calls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0}
+  );
+  return (
+    <section className="grid gap-4">
+      <div className="grid gap-3 md:grid-cols-4">
+        <MetricCard label="LLM calls" value={totals.calls} />
+        <MetricCard label="Input tokens" value={totals.inputTokens} />
+        <MetricCard label="Output tokens" value={totals.outputTokens} />
+        <MetricCard label="Total tokens" value={totals.totalTokens} />
+      </div>
+      <div className="overflow-hidden rounded-lg border border-line bg-white shadow-sm">
+        <div className="grid grid-cols-[1.3fr_1fr_1fr_.7fr_1fr_1fr_1fr] gap-3 border-b border-line bg-panel p-3 text-xs font-semibold uppercase tracking-normal text-slate-500">
+          <span>Operation</span>
+          <span>Provider</span>
+          <span>Model</span>
+          <span>Calls</span>
+          <span>Input</span>
+          <span>Output</span>
+          <span>Total</span>
+        </div>
+        {rows.length === 0 && (
+          <div className="p-4 text-sm text-slate-500">No LLM telemetry has been recorded yet.</div>
+        )}
+        {rows.map((row) => (
+          <div
+            key={`${row.operation}-${row.provider}-${row.model}`}
+            className="grid grid-cols-[1.3fr_1fr_1fr_.7fr_1fr_1fr_1fr] gap-3 border-b border-line p-3 text-sm last:border-b-0"
+          >
+            <span className="font-medium">{operationLabel(row.operation)}</span>
+            <span>{row.provider}</span>
+            <span>{row.model}</span>
+            <span>{formatNumber(row._sum.calls ?? 0)}</span>
+            <span>{formatNumber(row._sum.inputTokens ?? 0)}</span>
+            <span>{formatNumber(row._sum.outputTokens ?? 0)}</span>
+            <span>{formatNumber(row._sum.totalTokens ?? 0)}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function Toolbar({children}: {children: React.ReactNode}) {
   return <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-white p-3 shadow-sm">{children}</div>;
+}
+
+function MetricCard({label, value}: {label: string; value: number}) {
+  return (
+    <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
+      <p className="text-xs font-semibold uppercase tracking-normal text-slate-500">{label}</p>
+      <p className="mt-2 text-2xl font-semibold">{formatNumber(value)}</p>
+    </div>
+  );
+}
+
+function operationLabel(operation: string): string {
+  return titleCase(operation.split('_').join(' '));
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat().format(value);
 }
 
 export default App;
