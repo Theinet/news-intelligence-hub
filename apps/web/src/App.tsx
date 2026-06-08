@@ -901,10 +901,23 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
       return undefined;
     }
     const timer = window.setInterval(() => {
-      request<RegenerationRun>(`/regenerations/${regeneration.id}`).then(setRegeneration);
+      request<RegenerationRun>(`/regenerations/${regeneration.id}`)
+        .then(setRegeneration)
+        .catch((error) => {
+          setMessage(makeNotice('error', errorMessage(error, 'Unable to refresh regeneration status.')));
+          setRegeneration((current) => current ? {...current, status: 'failed'} : current);
+        });
     }, 1500);
     return () => window.clearInterval(timer);
   }, [regeneration, request]);
+  useEffect(() => {
+    if (regeneration?.status !== 'done') {
+      return undefined;
+    }
+    setMessage(makeNotice('info', 'Regeneration completed.'));
+    const timer = window.setTimeout(() => setRegeneration(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [regeneration?.status]);
 
   async function addCategory() {
     const name = categoryName.trim();
@@ -1011,14 +1024,14 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
             <div>
               <h2 className="font-semibold">Regeneration</h2>
               <p className="text-sm text-slate-500">
-                {regeneration.status} · {regeneration.processed} of {regeneration.total} articles
+                {regenerationStatusText(regeneration)} - {regeneration.processed} of {regeneration.total} articles
               </p>
             </div>
             <span className="rounded bg-slate-100 px-2 py-1 text-xs">{regeneration.id}</span>
           </div>
           <div className="mt-3 h-2 overflow-hidden rounded bg-slate-100">
             <div
-              className="h-full bg-accent"
+              className={`h-full ${regeneration.status === 'failed' ? 'bg-red-500' : 'bg-accent'}`}
               style={{width: `${progressPercent(regeneration)}%`}}
             />
           </div>
@@ -1131,6 +1144,19 @@ function progressPercent(run: RegenerationRun): number {
     return run.status === 'done' ? 100 : 0;
   }
   return Math.min(100, Math.round((run.processed / run.total) * 100));
+}
+
+function regenerationStatusText(run: RegenerationRun): string {
+  if (run.status === 'done') {
+    return 'Completed';
+  }
+  if (run.status === 'failed') {
+    return 'Failed';
+  }
+  if (run.status === 'running') {
+    return 'Running';
+  }
+  return 'Queued';
 }
 
 function errorMessage(error: unknown, fallback: string): string {
