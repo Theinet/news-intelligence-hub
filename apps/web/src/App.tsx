@@ -128,6 +128,12 @@ interface Notice {
   text: string;
 }
 
+interface AuthMessage {
+  kind: 'info' | 'error';
+  text: string;
+  href?: string;
+}
+
 function makeNotice(kind: Notice['kind'], text: string): Notice {
   return {
     id: `${Date.now()}-${Math.random()}`,
@@ -139,7 +145,7 @@ function makeNotice(kind: Notice['kind'], text: string): Notice {
 function App() {
   const [token, setToken] = useState(localStorage.getItem('nih_token') ?? '');
   const [view, setView] = useState<View>('articles');
-  const [message, setMessage] = useState('');
+  const [authMessage, setAuthMessage] = useState<AuthMessage | null>(null);
 
   const request = useCallback(async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
     const response = await fetch(`${apiUrl}${path}`, {
@@ -170,7 +176,7 @@ function App() {
   }
 
   if (!token) {
-    return <AuthScreen setToken={setToken} setMessage={setMessage} message={message} />;
+    return <AuthScreen setToken={setToken} setMessage={setAuthMessage} message={authMessage} />;
   }
 
   const nav = [
@@ -273,8 +279,8 @@ function ErrorBlock({message, onRetry}: {message: string; onRetry: () => void}) 
 
 function AuthScreen(props: {
   setToken: (token: string) => void;
-  setMessage: (message: string) => void;
-  message: string;
+  setMessage: (message: AuthMessage | null) => void;
+  message: AuthMessage | null;
 }) {
   const [email, setEmail] = useState('demo@example.com');
   const [password, setPassword] = useState('Password123!');
@@ -283,7 +289,7 @@ function AuthScreen(props: {
   const isLogin = mode === 'login';
 
   async function submit() {
-    props.setMessage('');
+    props.setMessage(null);
     const response = await fetch(`${apiUrl}/auth/${mode}`, {
       method: 'POST',
       headers: {'content-type': 'application/json'},
@@ -291,13 +297,19 @@ function AuthScreen(props: {
     });
     const data = await response.json() as ApiErrorBody & {accessToken?: string; devVerifyUrl?: string};
     if (!response.ok) {
-      props.setMessage(formatAuthError(data));
+      props.setMessage({kind: 'error', text: formatAuthError(data)});
       return;
     }
     if (mode === 'login') {
       props.setToken(data.accessToken ?? '');
     } else {
-      props.setMessage(`DEV MODE verification link: ${data.devVerifyUrl}`);
+      props.setMessage({
+        kind: 'info',
+        text: data.devVerifyUrl
+          ? 'DEV MODE verification link created.'
+          : 'Registration created. Check service logs for the DEV MODE verification link.',
+        href: data.devVerifyUrl
+      });
     }
   }
 
@@ -326,7 +338,7 @@ function AuthScreen(props: {
             value={email}
             onChange={(e) => {
               setEmail(e.target.value);
-              props.setMessage('');
+              props.setMessage(null);
             }}
           />
           <div className="relative">
@@ -336,7 +348,7 @@ function AuthScreen(props: {
               value={password}
               onChange={(e) => {
                 setPassword(e.target.value);
-                props.setMessage('');
+                props.setMessage(null);
               }}
             />
             <button
@@ -365,9 +377,23 @@ function AuthScreen(props: {
             {isLogin ? 'Create account' : 'Use existing account'}
           </button>
           {props.message && (
-            <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {props.message}
-            </p>
+            <div
+              className={`rounded-md border p-3 text-sm ${
+                props.message.kind === 'error'
+                  ? 'border-red-200 bg-red-50 text-red-700'
+                  : 'border-teal-200 bg-teal-50 text-accent'
+              }`}
+            >
+              <p>{props.message.text}</p>
+              {props.message.href && (
+                <>
+                  <a className="mt-2 inline-block font-medium underline" href={props.message.href}>
+                    Open verification link
+                  </a>
+                  <span className="mt-1 block break-all text-xs text-slate-600">{props.message.href}</span>
+                </>
+              )}
+            </div>
           )}
         </div>
       </section>
