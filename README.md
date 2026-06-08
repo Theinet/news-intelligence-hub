@@ -26,11 +26,18 @@ cp .env.example .env
 docker compose up --build
 ```
 
+On Windows PowerShell, use:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build
+```
+
 Open:
 
 - App: `http://localhost:5173`
 - API: `http://localhost:3000`
-- Bull Board: `http://localhost:3000/admin/queues`
+- Bull Board: `http://localhost:3000/admin/queues` with `BULL_BOARD_USER` / `BULL_BOARD_PASSWORD` from `.env` (default example values: `admin` / `change-me`).
 
 Default demo account seeded on startup:
 
