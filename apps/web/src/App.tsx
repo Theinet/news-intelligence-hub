@@ -108,6 +108,10 @@ function App() {
     });
     const text = await response.text();
     if (!response.ok) {
+      if (response.status === 401 && token) {
+        setToken('');
+        localStorage.removeItem('nih_token');
+      }
       throw new Error(formatApiErrorText(text));
     }
     return (text ? JSON.parse(text) : undefined) as T;

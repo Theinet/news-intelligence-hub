@@ -26,7 +26,12 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Missing bearer token');
     }
     const token = header.slice('Bearer '.length);
-    const payload = await this.jwt.verifyAsync<{sub: string; email: string}>(token);
+    let payload: {sub: string; email: string};
+    try {
+      payload = await this.jwt.verifyAsync<{sub: string; email: string}>(token);
+    } catch {
+      throw new UnauthorizedException('Invalid or expired token');
+    }
     const user = await this.prisma.user.findUnique({where: {id: payload.sub}});
     if (!user) {
       throw new UnauthorizedException('Unknown user');
