@@ -1,5 +1,10 @@
 import {Injectable} from '@nestjs/common';
 import {PrismaService} from '../common/prisma.service';
+import {
+  digestArticleMatchesFilters,
+  digestPeriodStart,
+  isDigestPeriod
+} from '../digests/digest-filters';
 import {LlmService} from '../llm/llm.service';
 
 @Injectable()
@@ -15,13 +20,24 @@ export class DigestBuilderService {
       return;
     }
     try {
-      const since = this.periodStart(digest.period);
-      const articles = await this.prisma.article.findMany({
-        where: {userId, status: 'processed', publishedAt: {gte: since}},
+      const period = isDigestPeriod(digest.period) ? digest.period : 'day';
+      const since = digestPeriodStart(period);
+      const categoryNames = normalizeStringArray(digest.categoryNames);
+      const entityIds = normalizeStringArray(digest.entityIds);
+      const candidates = await this.prisma.article.findMany({
+        where: {
+          userId,
+          status: 'processed',
+          publishedAt: {gte: since},
+          mentions: entityIds.length > 0 ? {some: {entityId: {in: entityIds}}} : undefined
+        },
         include: {mentions: {include: {entity: true}}},
         orderBy: [{importance: 'asc'}, {publishedAt: 'desc'}],
         take: 30
       });
+      const articles = candidates.filter((article) => (
+        digestArticleMatchesFilters(article, categoryNames, entityIds)
+      ));
       const entityCounts = new Map<string, number>();
       const categoryCounts = new Map<string, number>();
       for (const article of articles) {
@@ -46,7 +62,7 @@ export class DigestBuilderService {
         summary: article.summary
       }));
       const result = await this.llm.buildDigest(userId, {
-        period: digest.period,
+        period,
         topEntities,
         topCategories,
         keyArticles
@@ -62,10 +78,13 @@ export class DigestBuilderService {
       });
     }
   }
+}
 
-  private periodStart(period: string): Date {
-    const now = new Date();
-    const days = period === 'month' ? 30 : period === 'week' ? 7 : 1;
-    return new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
   }
+  return value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim());
 }

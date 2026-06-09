@@ -94,6 +94,8 @@ interface Digest extends JsonRecord {
   id: string;
   status: string;
   period: string;
+  categoryNames: string[];
+  entityIds: string[];
   topEntities: DigestCount[];
   topCategories: DigestCount[];
   keyArticles: DigestArticle[];
@@ -794,6 +796,7 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
   const [graph, setGraph] = useState<{nodes: JsonRecord[]; edges: JsonRecord[]}>({nodes: [], edges: []});
   const [nodes, setNodes] = useState<Node[]>([]);
   const [nodeKind, setNodeKind] = useState('');
+  const [edgeMode, setEdgeMode] = useState<'core' | 'all' | 'similar'>('core');
   const [category, setCategory] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -835,13 +838,35 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
     });
   }, [graph.nodes]);
   const visibleNodeIds = useMemo(() => new Set(nodes.map((node) => node.id)), [nodes]);
-  const edges = useMemo<Edge[]>(() => graph.edges.map((edge, index) => ({
-    id: `${edge.from}-${edge.to}-${index}`,
-    source: String(edge.from),
-    target: String(edge.to),
-    label: String(edge.kind),
-    animated: edge.kind === 'co_mention'
-  })).filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)), [graph.edges, visibleNodeIds]);
+  const edges = useMemo<Edge[]>(() => graph.edges
+    .filter((edge) => {
+      const kind = String(edge.kind);
+      if (edgeMode === 'core') {
+        return kind !== 'similar';
+      }
+      if (edgeMode === 'similar') {
+        return kind === 'similar';
+      }
+      return true;
+    })
+    .map((edge, index) => {
+      const kind = String(edge.kind);
+      const score = Number(edge.score);
+      return {
+        id: `${edge.from}-${edge.to}-${kind}-${index}`,
+        source: String(edge.from),
+        target: String(edge.to),
+        label: kind === 'similar' && Number.isFinite(score) ? score.toFixed(2) : kind,
+        animated: kind === 'similar',
+        style: {
+          opacity: kind === 'similar' ? 0.65 : 1,
+          stroke: kind === 'similar' ? '#7c3aed' : kind === 'co_mention' ? '#94a3b8' : '#64748b',
+          strokeDasharray: kind === 'similar' || kind === 'co_mention' ? '5 5' : undefined
+        }
+      };
+    })
+    .filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)),
+  [edgeMode, graph.edges, visibleNodeIds]);
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     setNodes((currentNodes) => applyNodeChanges(changes, currentNodes));
   }, []);
@@ -869,6 +894,11 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
           </select>
           <input className="h-10 rounded-md border border-line px-3" placeholder="Search graph" value={search} onChange={(e) => setSearch(e.target.value)} />
           <input className="h-10 rounded-md border border-line px-3" placeholder="Category" value={category} onChange={(e) => setCategory(e.target.value)} />
+          <select className="h-10 rounded-md border border-line px-3" value={edgeMode} onChange={(e) => setEdgeMode(e.target.value as 'core' | 'all' | 'similar')}>
+            <option value="core">Core links</option>
+            <option value="all">All links</option>
+            <option value="similar">Similar only</option>
+          </select>
         </Toolbar>
         <div className="mt-4 h-[680px] overflow-hidden rounded-lg border border-line bg-white">
           {loading && <div className="p-4"><LoadingBlock text="Loading graph..." /></div>}
@@ -1275,6 +1305,11 @@ function errorMessage(error: unknown, fallback: string): string {
 
 function Digests({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
   const [digests, setDigests] = useState<Digest[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [entities, setEntities] = useState<Entity[]>([]);
+  const [period, setPeriod] = useState('day');
+  const [categoryName, setCategoryName] = useState('');
+  const [entityId, setEntityId] = useState('');
   const [loading, setLoading] = useState(true);
   const [building, setBuilding] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -1297,16 +1332,38 @@ function Digests({request}: {request: <T>(path: string, init?: RequestInit) => P
     void load();
   }, [load]);
   useEffect(() => {
+    async function loadOptions() {
+      try {
+        const [categoryRows, entityRows] = await Promise.all([
+          request<Category[]>('/categories'),
+          request<Entity[]>('/entities')
+        ]);
+        setCategories(categoryRows);
+        setEntities(entityRows);
+      } catch (error) {
+        setLoadError(errorMessage(error, 'Unable to load digest filters.'));
+      }
+    }
+    void loadOptions();
+  }, [request]);
+  useEffect(() => {
     if (!digests.some((digest) => digest.status === 'queued')) {
       return;
     }
     const timer = window.setTimeout(() => void load(false), 2000);
     return () => window.clearTimeout(timer);
   }, [digests, load]);
-  async function buildDailyDigest() {
+  async function buildDigest() {
     setBuilding(true);
     try {
-      await request('/digests', {method: 'POST', body: JSON.stringify({period: 'day'})});
+      await request('/digests', {
+        method: 'POST',
+        body: JSON.stringify({
+          period,
+          categoryNames: categoryName ? [categoryName] : [],
+          entityIds: entityId ? [entityId] : []
+        })
+      });
       await load(false);
     } catch (error) {
       setLoadError(errorMessage(error, 'Unable to build digest.'));
@@ -1317,12 +1374,41 @@ function Digests({request}: {request: <T>(path: string, init?: RequestInit) => P
   return (
     <section>
       <Toolbar>
+        <select
+          className="h-10 rounded-md border border-line bg-white px-3"
+          value={period}
+          onChange={(event) => setPeriod(event.target.value)}
+        >
+          <option value="day">Day</option>
+          <option value="week">Week</option>
+          <option value="month">Month</option>
+        </select>
+        <select
+          className="h-10 min-w-48 rounded-md border border-line bg-white px-3"
+          value={categoryName}
+          onChange={(event) => setCategoryName(event.target.value)}
+        >
+          <option value="">All categories</option>
+          {categories.map((category) => (
+            <option key={category.id} value={category.name}>{category.name}</option>
+          ))}
+        </select>
+        <select
+          className="h-10 min-w-48 rounded-md border border-line bg-white px-3"
+          value={entityId}
+          onChange={(event) => setEntityId(event.target.value)}
+        >
+          <option value="">All entities</option>
+          {entities.map((entity) => (
+            <option key={entity.id} value={entity.id}>{entity.canonicalName}</option>
+          ))}
+        </select>
         <button
           className="rounded-md bg-accent px-3 py-2 text-white disabled:opacity-60"
           disabled={building}
-          onClick={() => void buildDailyDigest()}
+          onClick={() => void buildDigest()}
         >
-          {building ? 'Building...' : 'Build daily digest'}
+          {building ? 'Building...' : `Build ${period} digest`}
         </button>
       </Toolbar>
       <div className="mt-4 grid gap-3">
@@ -1333,16 +1419,23 @@ function Digests({request}: {request: <T>(path: string, init?: RequestInit) => P
             No digests have been built yet.
           </div>
         )}
-        {!loading && !loadError && digests.map((digest) => <DigestCard key={digest.id} digest={digest} />)}
+        {!loading && !loadError && digests.map((digest) => (
+          <DigestCard
+            key={digest.id}
+            digest={digest}
+            entityNames={entitiesById(entities, digest.entityIds ?? [])}
+          />
+        ))}
       </div>
     </section>
   );
 }
 
-function DigestCard({digest}: {digest: Digest}) {
+function DigestCard({digest, entityNames}: {digest: Digest; entityNames: string[]}) {
   const topEntities = Array.isArray(digest.topEntities) ? digest.topEntities : [];
   const topCategories = Array.isArray(digest.topCategories) ? digest.topCategories : [];
   const keyArticles = Array.isArray(digest.keyArticles) ? digest.keyArticles : [];
+  const categoryNames = Array.isArray(digest.categoryNames) ? digest.categoryNames : [];
   return (
     <article className="rounded-lg border border-line bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1352,7 +1445,17 @@ function DigestCard({digest}: {digest: Digest}) {
             <span className="rounded bg-slate-100 px-2 py-1">{titleCase(digest.period)}</span>
             <span>{new Date(digest.createdAt).toLocaleString()}</span>
           </div>
-          <h2 className="mt-2 text-lg font-semibold">Daily news digest</h2>
+          <h2 className="mt-2 text-lg font-semibold">{titleCase(digest.period)} news digest</h2>
+          {(categoryNames.length > 0 || entityNames.length > 0) && (
+            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+              {categoryNames.map((category) => (
+                <span key={category} className="rounded bg-teal-50 px-2 py-1 text-accent">{category}</span>
+              ))}
+              {entityNames.map((entity) => (
+                <span key={entity} className="rounded bg-slate-100 px-2 py-1">{entity}</span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       {digest.status === 'queued' && (
@@ -1384,6 +1487,11 @@ function DigestCard({digest}: {digest: Digest}) {
       </div>
     </article>
   );
+}
+
+function entitiesById(entities: Entity[], ids: string[]): string[] {
+  const names = new Map(entities.map((entity) => [entity.id, entity.canonicalName]));
+  return ids.map((id) => names.get(id) ?? id);
 }
 
 function DigestCountList(props: {title: string; items: DigestCount[]; emptyText: string}) {

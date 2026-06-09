@@ -28,6 +28,11 @@ export class ArticlesController {
     return this.articles.get(user.id, id);
   }
 
+  @Get('entities')
+  entities(@CurrentUser() user: CurrentUser) {
+    return this.articles.entities(user.id);
+  }
+
   @Get('entities/:id')
   entity(@CurrentUser() user: CurrentUser, @Param('id') id: string) {
     return this.articles.entity(user.id, id);

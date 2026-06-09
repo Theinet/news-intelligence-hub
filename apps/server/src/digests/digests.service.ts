@@ -1,6 +1,7 @@
-import {Injectable, NotFoundException} from '@nestjs/common';
+import {BadRequestException, Injectable, NotFoundException} from '@nestjs/common';
 import {PrismaService} from '../common/prisma.service';
 import {QueuesService} from '../jobs/queues.service';
+import {DigestPeriod, isDigestPeriod} from './digest-filters';
 
 @Injectable()
 export class DigestsService {
@@ -14,12 +15,18 @@ export class DigestsService {
   }
 
   async create(userId: string, body: {period: string; categoryNames?: string[]; entityIds?: string[]}) {
+    if (!isDigestPeriod(body.period)) {
+      throw new BadRequestException('Digest period must be day, week, or month');
+    }
+    const period: DigestPeriod = body.period;
+    const categoryNames = cleanStringArray(body.categoryNames);
+    const entityIds = cleanStringArray(body.entityIds);
     const digest = await this.prisma.digest.create({
       data: {
         userId,
-        period: body.period,
-        categoryNames: body.categoryNames ?? [],
-        entityIds: body.entityIds ?? []
+        period,
+        categoryNames,
+        entityIds
       }
     });
     await this.queues.digest.add('digest.build', {userId, digestId: digest.id});
@@ -42,4 +49,11 @@ export class DigestsService {
       _count: {_all: true}
     });
   }
+}
+
+function cleanStringArray(value?: string[]): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => item.trim()).filter(Boolean);
 }
