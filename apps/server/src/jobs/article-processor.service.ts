@@ -5,10 +5,18 @@ import {PrismaService} from '../common/prisma.service';
 import {normalizeEntityName} from '../common/text';
 import {ArticleAnalysisResult, articleAnalysisResultSchema} from '../llm/contracts';
 import {LlmService} from '../llm/llm.service';
+import {articleSimilarityScore, SimilarityArticle} from './article-similarity';
 import {prefilterArticle} from './prefilter';
 
 @Injectable()
 export class ArticleProcessorService {
+  private readonly similarityLookbackDays =
+    Number(process.env.SIMILARITY_LOOKBACK_DAYS ?? 45) || 45;
+  private readonly similarityMaxCandidates =
+    Number(process.env.SIMILARITY_MAX_CANDIDATES ?? 80) || 80;
+  private readonly similarityMinScore =
+    Number(process.env.SIMILARITY_MIN_SCORE ?? 0.22) || 0.22;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly llm: LlmService
@@ -118,7 +126,6 @@ export class ArticleProcessorService {
         });
       }
     }
-    const similarCount = await this.updateDuplicateCounts(userId, article.id, article.contentHash);
     await this.prisma.article.update({
       where: {id: article.id},
       data: {
@@ -128,10 +135,18 @@ export class ArticleProcessorService {
         categories: analysis.categories,
         axes: analysis.axes,
         status: 'processed',
-        llmCacheHit: Boolean(cached),
-        similarCount
+        llmCacheHit: Boolean(cached)
       }
     });
+    await this.updateSemanticSimilarity(userId, {
+      id: article.id,
+      title: article.title,
+      content: article.content,
+      summary: analysis.summary,
+      categories: analysis.categories,
+      entityIds
+    }, article.publishedAt);
+    await this.updateRelatedSimilarityCounts(userId, article.id);
     await this.incrementRegeneration(regenerationId);
     console.log(JSON.stringify({
       level: 'info',
@@ -143,18 +158,138 @@ export class ArticleProcessorService {
     }));
   }
 
-  private async updateDuplicateCounts(userId: string, articleId: string, contentHash: string): Promise<number> {
-    const duplicates = await this.prisma.article.findMany({
-      where: {userId, contentHash, id: {not: articleId}},
-      select: {id: true}
-    });
-    for (const duplicate of duplicates) {
-      await this.prisma.article.update({
-        where: {id: duplicate.id},
-        data: {similarCount: duplicates.length}
-      });
+  private async updateSemanticSimilarity(
+    userId: string,
+    current: SimilarityArticle,
+    publishedAt: Date
+  ): Promise<void> {
+    if (this.similarityMaxCandidates <= 0 || this.similarityMinScore > 1) {
+      return;
     }
-    return duplicates.length;
+    const windowMs = Math.max(this.similarityLookbackDays, 1) * 24 * 60 * 60 * 1000;
+    const candidates = await this.prisma.article.findMany({
+      where: {
+        userId,
+        id: {not: current.id},
+        status: 'processed',
+        publishedAt: {
+          gte: new Date(publishedAt.getTime() - windowMs),
+          lte: new Date(publishedAt.getTime() + windowMs)
+        }
+      },
+      include: {mentions: {select: {entityId: true}}},
+      orderBy: {publishedAt: 'desc'},
+      take: Math.max(this.similarityMaxCandidates, 1)
+    });
+    const affectedArticleIds = new Set<string>();
+    for (const candidate of candidates) {
+      const score = articleSimilarityScore(current, {
+        id: candidate.id,
+        title: candidate.title,
+        content: candidate.content,
+        summary: candidate.summary,
+        categories: candidate.categories,
+        entityIds: candidate.mentions.map((mention) => mention.entityId)
+      });
+      const [fromId, toId] = [current.id, candidate.id].sort();
+      if (score >= this.similarityMinScore) {
+        affectedArticleIds.add(candidate.id);
+        await this.prisma.graphEdge.upsert({
+          where: {
+            userId_fromId_toId_kind: {
+              userId,
+              fromId,
+              toId,
+              kind: 'similar'
+            }
+          },
+          create: {userId, fromId, toId, kind: 'similar', score},
+          update: {score}
+        });
+      } else {
+        const deleted = await this.prisma.graphEdge.deleteMany({
+          where: {userId, fromId, toId, kind: 'similar'}
+        });
+        if (deleted.count > 0) {
+          affectedArticleIds.add(candidate.id);
+        }
+      }
+    }
+    for (const articleId of affectedArticleIds) {
+      await this.updateArticleSimilarityCount(userId, articleId);
+    }
+  }
+
+  private async updateArticleSimilarityCount(userId: string, articleId: string): Promise<number> {
+    const article = await this.prisma.article.findFirst({
+      where: {userId, id: articleId},
+      select: {contentHash: true, normalizedUrl: true}
+    });
+    if (!article) {
+      return 0;
+    }
+    const [duplicates, similarEdges] = await Promise.all([
+      this.prisma.article.findMany({
+        where: {
+          userId,
+          id: {not: articleId},
+          OR: [{contentHash: article.contentHash}, {normalizedUrl: article.normalizedUrl}]
+        },
+        select: {id: true}
+      }),
+      this.prisma.graphEdge.findMany({
+        where: {
+          userId,
+          kind: 'similar',
+          OR: [{fromId: articleId}, {toId: articleId}]
+        },
+        select: {fromId: true, toId: true}
+      })
+    ]);
+    const similarArticleIds = new Set(duplicates.map((duplicate) => duplicate.id));
+    for (const edge of similarEdges) {
+      similarArticleIds.add(edge.fromId === articleId ? edge.toId : edge.fromId);
+    }
+    const similarCount = similarArticleIds.size;
+    await this.prisma.article.update({
+      where: {id: articleId},
+      data: {similarCount}
+    });
+    return similarCount;
+  }
+
+  private async updateRelatedSimilarityCounts(userId: string, articleId: string): Promise<void> {
+    const article = await this.prisma.article.findFirst({
+      where: {userId, id: articleId},
+      select: {contentHash: true, normalizedUrl: true}
+    });
+    if (!article) {
+      return;
+    }
+    const [duplicates, similarEdges] = await Promise.all([
+      this.prisma.article.findMany({
+        where: {
+          userId,
+          id: {not: articleId},
+          OR: [{contentHash: article.contentHash}, {normalizedUrl: article.normalizedUrl}]
+        },
+        select: {id: true}
+      }),
+      this.prisma.graphEdge.findMany({
+        where: {userId, kind: 'similar', OR: [{fromId: articleId}, {toId: articleId}]},
+        select: {fromId: true, toId: true}
+      })
+    ]);
+    const articleIds = new Set<string>([articleId]);
+    for (const duplicate of duplicates) {
+      articleIds.add(duplicate.id);
+    }
+    for (const edge of similarEdges) {
+      articleIds.add(edge.fromId === articleId ? edge.toId : edge.fromId);
+    }
+    for (const id of articleIds) {
+      await this.updateArticleSimilarityCount(userId, id);
+    }
   }
 
   private async incrementRegeneration(regenerationId?: string): Promise<void> {

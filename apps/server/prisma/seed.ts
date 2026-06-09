@@ -4,8 +4,81 @@ import {createHash} from 'node:crypto';
 
 const prisma = new PrismaClient();
 
+const stopWords = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'as',
+  'at',
+  'be',
+  'by',
+  'for',
+  'from',
+  'how',
+  'in',
+  'into',
+  'is',
+  'it',
+  'new',
+  'of',
+  'on',
+  'or',
+  'so',
+  'that',
+  'the',
+  'this',
+  'to',
+  'with'
+]);
+
+interface SimilarityArticle {
+  id: string;
+  title: string;
+  content: string;
+  summary?: string | null;
+  categories: unknown;
+  entityIds: string[];
+}
+
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function articleSimilarityScore(left: SimilarityArticle, right: SimilarityArticle): number {
+  const textScore = jaccard(articleTokens(left), articleTokens(right));
+  const categoryScore = jaccard(categoryTokens(left.categories), categoryTokens(right.categories));
+  const entityScore = jaccard(new Set(left.entityIds), new Set(right.entityIds));
+  return Math.round((textScore * 0.55 + categoryScore * 0.25 + entityScore * 0.20) * 1000) / 1000;
+}
+
+function articleTokens(article: SimilarityArticle): Set<string> {
+  return tokenize(`${article.title} ${article.summary ?? ''} ${article.content.slice(0, 2000)}`);
+}
+
+function categoryTokens(categories: unknown): Set<string> {
+  if (!Array.isArray(categories)) {
+    return new Set();
+  }
+  return tokenize(categories.map(String).join(' '));
+}
+
+function tokenize(value: string): Set<string> {
+  const words = value.toLowerCase().match(/\p{L}[\p{L}\p{N}]*/gu) ?? [];
+  return new Set(words.filter((word) => word.length > 1 && !stopWords.has(word)));
+}
+
+function jaccard(left: Set<string>, right: Set<string>): number {
+  if (left.size === 0 || right.size === 0) {
+    return 0;
+  }
+  let intersection = 0;
+  for (const item of left) {
+    if (right.has(item)) {
+      intersection++;
+    }
+  }
+  return intersection / (left.size + right.size - intersection);
 }
 
 function normalizeUrl(url: string): string {
@@ -26,6 +99,44 @@ function demoCategories(title: string): string[] {
     return ['DevTools'];
   }
   return ['AI infrastructure'];
+}
+
+async function refreshSimilarityCounts(userId: string, articleIds: string[]): Promise<void> {
+  for (const articleId of articleIds) {
+    const article = await prisma.article.findFirst({
+      where: {userId, id: articleId},
+      select: {contentHash: true, normalizedUrl: true}
+    });
+    if (!article) {
+      continue;
+    }
+    const [duplicates, similarEdges] = await Promise.all([
+      prisma.article.findMany({
+        where: {
+          userId,
+          id: {not: articleId},
+          OR: [{contentHash: article.contentHash}, {normalizedUrl: article.normalizedUrl}]
+        },
+        select: {id: true}
+      }),
+      prisma.graphEdge.findMany({
+        where: {
+          userId,
+          kind: 'similar',
+          OR: [{fromId: articleId}, {toId: articleId}]
+        },
+        select: {fromId: true, toId: true}
+      })
+    ]);
+    const similarArticleIds = new Set(duplicates.map((duplicate) => duplicate.id));
+    for (const edge of similarEdges) {
+      similarArticleIds.add(edge.fromId === articleId ? edge.toId : edge.fromId);
+    }
+    await prisma.article.update({
+      where: {id: articleId},
+      data: {similarCount: similarArticleIds.size}
+    });
+  }
 }
 
 async function main(): Promise<void> {
@@ -205,6 +316,50 @@ async function main(): Promise<void> {
       }
     }
   }
+  const seededArticles = await prisma.article.findMany({
+    where: {userId: user.id, status: 'processed'},
+    include: {mentions: {select: {entityId: true}}},
+    orderBy: {publishedAt: 'desc'},
+    take: Number(process.env.SIMILARITY_MAX_CANDIDATES ?? 80)
+  });
+  const minSimilarityScore = Number(process.env.SIMILARITY_MIN_SCORE ?? 0.22);
+  for (let left = 0; left < seededArticles.length; left++) {
+    for (let right = left + 1; right < seededArticles.length; right++) {
+      const leftArticle: SimilarityArticle = {
+        id: seededArticles[left].id,
+        title: seededArticles[left].title,
+        content: seededArticles[left].content,
+        summary: seededArticles[left].summary,
+        categories: seededArticles[left].categories,
+        entityIds: seededArticles[left].mentions.map((mention) => mention.entityId)
+      };
+      const rightArticle: SimilarityArticle = {
+        id: seededArticles[right].id,
+        title: seededArticles[right].title,
+        content: seededArticles[right].content,
+        summary: seededArticles[right].summary,
+        categories: seededArticles[right].categories,
+        entityIds: seededArticles[right].mentions.map((mention) => mention.entityId)
+      };
+      const score = articleSimilarityScore(leftArticle, rightArticle);
+      const [fromId, toId] = [seededArticles[left].id, seededArticles[right].id].sort();
+      if (score >= minSimilarityScore) {
+        await prisma.graphEdge.upsert({
+          where: {
+            userId_fromId_toId_kind: {
+              userId: user.id,
+              fromId,
+              toId,
+              kind: 'similar'
+            }
+          },
+          update: {score},
+          create: {userId: user.id, fromId, toId, kind: 'similar', score}
+        });
+      }
+    }
+  }
+  await refreshSimilarityCounts(user.id, seededArticles.map((article) => article.id));
   console.log(`Seeded demo user ${email} / ${password}`);
 }
 

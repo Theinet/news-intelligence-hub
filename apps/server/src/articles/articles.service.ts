@@ -50,7 +50,7 @@ export class ArticlesService {
     if (!article) {
       throw new NotFoundException('Article not found');
     }
-    const similar = await this.prisma.article.findMany({
+    const exactSimilar = await this.prisma.article.findMany({
       where: {
         userId,
         id: {not: id},
@@ -62,7 +62,34 @@ export class ArticlesService {
       select: {id: true, title: true, url: true, publishedAt: true, feed: true},
       take: 20
     });
+    const similarEdges = await this.prisma.graphEdge.findMany({
+      where: {userId, kind: 'similar', OR: [{fromId: id}, {toId: id}]},
+      orderBy: {score: 'desc'},
+      take: 20
+    });
+    const exactIds = new Set(exactSimilar.map((item) => item.id));
+    const scoreByArticleId = new Map(
+      similarEdges.map((edge) => [edge.fromId === id ? edge.toId : edge.fromId, edge.score ?? 0])
+    );
+    const semanticSimilar = await this.prisma.article.findMany({
+      where: {userId, id: {in: Array.from(scoreByArticleId.keys()).filter((item) => !exactIds.has(item))}},
+      select: {id: true, title: true, url: true, publishedAt: true, feed: true}
+    });
+    const similar = [
+      ...exactSimilar,
+      ...semanticSimilar.sort((left, right) => {
+        return (scoreByArticleId.get(right.id) ?? 0) - (scoreByArticleId.get(left.id) ?? 0);
+      })
+    ].slice(0, 20);
     return {...article, similar};
+  }
+
+  entities(userId: string) {
+    return this.prisma.entity.findMany({
+      where: {userId},
+      orderBy: {canonicalName: 'asc'},
+      take: 200
+    });
   }
 
   async entity(userId: string, id: string) {
