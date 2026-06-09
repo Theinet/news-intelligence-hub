@@ -73,6 +73,35 @@ npm run check:unicode
 
 On Docker startup, `prisma db push` applies the schema and `prisma/seed.ts` creates a verified demo user, example categories and axes, a demo feed, processed articles, entities, mentions, and graph edges. This lets reviewers see the article list and graph immediately after startup.
 
+## Demo Walkthrough Mode
+
+The Docker seed is the demo walkthrough mode. It keeps the project reviewable without waiting for external RSS sources or real LLM keys.
+
+Use `demo@example.com` / `Password123!`, then check:
+
+- Articles: processed and filtered demo articles, feed/category/importance/state/time filters, article details, entity details, and unavailable demo original links.
+- Feeds: add an RSS/Atom URL, queue a manual pull, pause/resume, and delete feeds without deleting historical articles.
+- Graph: article/entity nodes, mentions, co-mentions, optional similarity edges, node/category/search filters, node details, and the graph legend.
+- Settings: category CRUD, axis CRUD, and queued regeneration progress.
+- Digests: queued daily digest with top entities, top categories, key articles, and generated summary.
+- Telemetry: LLM call/token aggregates grouped by operation.
+- Queues: Bull Board at `http://localhost:3000/admin/queues`.
+
+## Acceptance Walkthrough
+
+1. Copy `.env.example` to `.env` and keep the demo defaults or fill real provider keys.
+2. Run `docker compose up --build`.
+3. Open `http://localhost:5173`.
+4. Register a new user, use the DEV MODE verification link shown in the UI, log out, and log in again.
+5. Add an RSS/Atom feed from Feeds and click Pull.
+6. Use Articles filters, open an article, and open an entity from the article card.
+7. Open Graph, switch node filters, search, change edge mode, click article and entity nodes, and read the legend.
+8. Edit categories and axes in Settings, click Regenerate, and watch progress while navigating elsewhere.
+9. Build a daily digest and inspect Digests.
+10. Open Telemetry and confirm token/call aggregates.
+11. Open Bull Board with `BULL_BOARD_USER` / `BULL_BOARD_PASSWORD`.
+12. Run `npm run lint`, `npm run test`, and `npm run check:unicode` before submitting.
+
 ## Implemented Scope
 
 Must features implemented:
@@ -105,6 +134,18 @@ Known limits:
 - Semantic article similarity uses deterministic weighted overlap instead of embeddings or LLM pairwise comparisons to keep cost bounded.
 - Entity matching is deterministic with aliases and normalization, with the required Microsoft aliases covered.
 - Regeneration progress is queue-driven and lightweight; it is sufficient for MVP visibility but not a full job timeline.
+
+## Architecture At A Glance
+
+Frontend is a Vite React dashboard. It stores the JWT in local storage and calls the NestJS API with bearer auth. It does not own tenant rules; every protected API request is scoped by the authenticated user on the server.
+
+The NestJS API owns auth, email verification in dev mode, tenant-aware CRUD, graph read endpoints, telemetry reads, and enqueueing long work. HTTP handlers do not call LLM providers directly. They validate input, persist lightweight state, and enqueue BullMQ jobs.
+
+Workers own feed pulling, article processing, regeneration, and digest building. Feed pulling parses RSS/Atom and writes raw articles. Article processing runs deterministic URL/content deduplication and the heuristic pre-filter first, then uses one structured LLM call for accepted content. Regeneration reuses the same worker path and cache with the current category/axis configuration.
+
+PostgreSQL is the source of truth for users, feeds, categories, axes, articles, entities, graph edges, digests, LLM cache, and telemetry. Redis backs BullMQ and Bull Board. Bull Board is served separately from the product UI and protected with basic auth.
+
+The LLM layer is a small provider-neutral interface with OpenAI, Anthropic, and deterministic mock implementations. Provider choice, model names, token limits, concurrency, queue timing, and credentials come from env. This keeps the review demo deterministic while preserving the production path for real providers.
 
 ## Architectural Decisions
 

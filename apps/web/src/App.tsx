@@ -12,7 +12,7 @@ import {
   Trash2
 } from 'lucide-react';
 import {useCallback, useEffect, useMemo, useState} from 'react';
-import ReactFlow, {applyNodeChanges, Background, Controls, Edge, Node, NodeChange} from 'reactflow';
+import ReactFlow, {applyNodeChanges, Background, Controls, Edge, Node, NodeChange, Panel} from 'reactflow';
 
 const apiUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
@@ -263,7 +263,10 @@ function Toast({notice}: {notice: Notice | null}) {
 function LoadingBlock({text}: {text: string}) {
   return (
     <div className="rounded-lg border border-line bg-white p-4 text-sm text-slate-500 shadow-sm">
-      {text}
+      <div className="flex items-center gap-3">
+        <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand border-t-transparent" />
+        <span>{text}</span>
+      </div>
     </div>
   );
 }
@@ -271,10 +274,28 @@ function LoadingBlock({text}: {text: string}) {
 function ErrorBlock({message, onRetry}: {message: string; onRetry: () => void}) {
   return (
     <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 shadow-sm">
-      <p>{message}</p>
+      <p className="font-medium">{friendlyLoadError(message)}</p>
+      <p className="mt-1 text-red-600">
+        The API may still be starting. Try again in a few seconds or check the service logs.
+      </p>
       <button className="mt-3 rounded-md border border-red-200 bg-white px-3 py-2 text-sm" onClick={onRetry}>
         Retry
       </button>
+    </div>
+  );
+}
+
+function friendlyLoadError(message: string) {
+  return message.toLowerCase().includes('internal server error')
+    ? 'The server returned an error while loading this view.'
+    : message;
+}
+
+function EmptyState({title, description}: {title: string; description: string}) {
+  return (
+    <div className="rounded-lg border border-dashed border-line bg-white p-5 text-sm shadow-sm">
+      <p className="font-medium text-slate-900">{title}</p>
+      <p className="mt-1 text-slate-500">{description}</p>
     </div>
   );
 }
@@ -475,6 +496,8 @@ function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
     request<Feed[]>('/feeds').then(setFeeds).catch(() => setFeeds([]));
   }, [request]);
 
+  const hasArticleFilters = Object.values(filters).some((value) => value.trim());
+
   return (
     <section className="grid gap-4 lg:grid-cols-[1fr_380px]">
       <div>
@@ -528,9 +551,14 @@ function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
           {loading && <LoadingBlock text="Loading articles..." />}
           {!loading && loadError && <ErrorBlock message={loadError} onRetry={load} />}
           {!loading && !loadError && articles.length === 0 && (
-            <div className="rounded-lg border border-line bg-white p-4 text-sm text-slate-500 shadow-sm">
-              No articles match the selected filters.
-            </div>
+            <EmptyState
+              title={hasArticleFilters ? 'No articles match these filters.' : 'No articles yet.'}
+              description={
+                hasArticleFilters
+                  ? 'Clear one or more filters, or switch the time window back to All time.'
+                  : 'Add a feed, run Pull, or use the seeded demo data after startup.'
+              }
+            />
           )}
           {!loading && !loadError && articles.map((article) => (
             <button key={article.id} className="rounded-lg border border-line bg-white p-4 text-left shadow-sm" onClick={() => setSelected(article)}>
@@ -550,7 +578,11 @@ function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
         </div>
       </div>
       <aside className="rounded-lg border border-line bg-white p-4 shadow-sm">
-        {selected ? <ArticleDetail article={selected} request={request} /> : <p className="text-sm text-slate-500">Select an article.</p>}
+        {selected ? (
+          <ArticleDetail article={selected} request={request} />
+        ) : (
+          <EmptyState title="Select an article." description="Click a card to view its summary, entities, categories, and axes." />
+        )}
       </aside>
     </section>
   );
@@ -741,6 +773,14 @@ function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Pro
       <Toast key={message?.id ?? 'feeds-toast'} notice={message} />
       {loading && <div className="mt-4"><LoadingBlock text="Loading feeds..." /></div>}
       {!loading && loadError && <div className="mt-4"><ErrorBlock message={loadError} onRetry={() => void load()} /></div>}
+      {!loading && !loadError && feeds.length === 0 && (
+        <div className="mt-4">
+          <EmptyState
+            title="No feeds yet."
+            description="Paste an RSS or Atom URL, then add it to queue the first pull."
+          />
+        </div>
+      )}
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         {!loading && !loadError && feeds.map((feed) => (
           <div key={feed.id} className="rounded-lg border border-line bg-white p-4 shadow-sm">
@@ -867,6 +907,7 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
     })
     .filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)),
   [edgeMode, graph.edges, visibleNodeIds]);
+  const hasGraphFilters = Boolean(nodeKind || category.trim() || search.trim());
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     setNodes((currentNodes) => applyNodeChanges(changes, currentNodes));
   }, []);
@@ -903,7 +944,19 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
         <div className="mt-4 h-[680px] overflow-hidden rounded-lg border border-line bg-white">
           {loading && <div className="p-4"><LoadingBlock text="Loading graph..." /></div>}
           {!loading && loadError && <div className="p-4"><ErrorBlock message={loadError} onRetry={loadGraph} /></div>}
-          {!loading && !loadError && (
+          {!loading && !loadError && nodes.length === 0 && (
+            <div className="p-4">
+              <EmptyState
+                title={hasGraphFilters ? 'No graph nodes match these filters.' : 'No graph data yet.'}
+                description={
+                  hasGraphFilters
+                    ? 'Clear search, node type, or category filters to bring nodes back.'
+                    : 'Process demo data or pull a feed so article and entity nodes can be built.'
+                }
+              />
+            </div>
+          )}
+          {!loading && !loadError && nodes.length > 0 && (
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -912,6 +965,7 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
               onNodesChange={onNodesChange}
               onNodeClick={(_, node) => selectNode(node.id)}
             >
+              <GraphLegend edgeMode={edgeMode} />
               <Background />
               <Controls />
             </ReactFlow>
@@ -922,10 +976,69 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
         {selectedNode ? (
           <GraphNodeDetails node={selectedNode} detail={selectedDetail} />
         ) : (
-          <p className="text-sm text-slate-500">Select a graph node.</p>
+          <EmptyState
+            title="Select a graph node."
+            description="Click an article or entity to inspect its details and linked records."
+          />
         )}
       </div>
     </section>
+  );
+}
+
+type LegendEdgeKind = 'mentions' | 'co_mention' | 'similar';
+
+function GraphLegend({edgeMode}: {edgeMode: 'core' | 'all' | 'similar'}) {
+  const rows: {
+    kind: LegendEdgeKind;
+    label: string;
+    description: string;
+    className: string;
+  }[] = [
+    {
+      kind: 'mentions',
+      label: 'Mentions',
+      description: 'article to entity',
+      className: 'border-slate-500'
+    },
+    {
+      kind: 'co_mention',
+      label: 'Co-mention',
+      description: 'entity pair weight',
+      className: 'border-slate-400 border-dashed'
+    },
+    {
+      kind: 'similar',
+      label: 'Similar',
+      description: 'article similarity score',
+      className: 'border-violet-500 border-dashed'
+    }
+  ];
+  const visibleRows = rows.filter((row) => {
+    if (edgeMode === 'core') {
+      return row.kind !== 'similar';
+    }
+    if (edgeMode === 'similar') {
+      return row.kind === 'similar';
+    }
+    return true;
+  });
+
+  return (
+    <Panel position="top-left" className="rounded-md border border-line bg-white/95 p-2 text-xs shadow-sm">
+      <div className="mb-1 font-medium text-slate-700">Graph links</div>
+      <div className="grid gap-1">
+        {visibleRows.map((row) => (
+          <div className="grid grid-cols-[72px_1fr] items-center gap-2" key={row.kind}>
+            <span className={`inline-block w-14 border-t-2 ${row.className}`} />
+            <span>
+              <span className="font-medium text-slate-700">{row.label}</span>
+              <span className="ml-1 text-slate-500">{row.description}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </Panel>
   );
 }
 
