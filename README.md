@@ -85,7 +85,7 @@ Must features implemented:
 - Article pre-filter before LLM analysis.
 - Custom LLM abstraction with OpenAI and Anthropic adapters selected by env.
 - LLM cache keyed by content hash and axes hash.
-- Entity and article deduplication basics.
+- Entity deduplication, exact article deduplication, and deterministic semantic article similarity edges.
 - LLM telemetry grouped by operation, provider, and model.
 - Article feed, article detail, entity detail API, React Flow graph, settings UI, regeneration action.
 - Bull Board protected by basic auth.
@@ -94,14 +94,15 @@ Must features implemented:
 Should features included:
 
 - Provider failover when mock mode is disabled and a primary provider fails.
-- Unit tests for the pre-filter.
+- Unit tests for the pre-filter, feed discovery, category matching, and digest filters.
 - Basic LLM telemetry dashboard.
-- Digest generation through a queue.
-- Graph category and node-type filters.
+- Digest generation through a queue, with day/week/month period selection and category/entity filters.
+- Graph category, node-type, and text-search filters.
+- Semantic similarity edges between related articles without pairwise LLM calls.
 
 Known limits:
 
-- Semantic article similarity is not implemented; duplicate matching uses URL and content hash.
+- Semantic article similarity uses deterministic weighted overlap instead of embeddings or LLM pairwise comparisons to keep cost bounded.
 - Entity matching is deterministic with aliases and normalization, with the required Microsoft aliases covered.
 - Regeneration progress is queue-driven and lightweight; it is sufficient for MVP visibility but not a full job timeline.
 
@@ -166,3 +167,13 @@ Decision: Domain tables include `userId`, and every API query filters by the aut
 Alternatives: Keep shared article storage with user-specific annotation tables.
 
 Trade-offs: User-scoped articles duplicate some raw content, but the access model is simpler and safer for an MVP. Shared raw storage can be introduced later behind the same user-scoped annotations.
+
+## ADR-7: Deterministic Article Similarity
+
+Context: The graph should connect related articles from different sources, but pairwise LLM comparison would become expensive as feeds grow.
+
+Decision: Build `similar` graph edges with a deterministic score from title/content token overlap, assigned categories, and shared entities. Exact duplicate detection still uses normalized URL and content hash.
+
+Alternatives: Use embeddings, ask the LLM to compare article pairs, or skip semantic similarity for MVP.
+
+Trade-offs: The deterministic score is cheaper, testable, and explainable, but less nuanced than embeddings. It is enough for MVP graph context and avoids quadratic LLM usage.
