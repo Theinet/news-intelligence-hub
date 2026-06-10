@@ -59,13 +59,23 @@ Useful checks:
 ```bash
 npm run lint
 npm run test
+npm run build
 npm run check:unicode
+npm audit
+docker compose config --quiet
+```
+
+To refresh reviewer screenshots while the Docker stack is running:
+
+```bash
+npm run screenshots
 ```
 
 ## Repository Structure
 
 - `apps/server`: NestJS API, BullMQ workers, Prisma schema, LLM adapters, RSS ingestion, graph building.
 - `apps/web`: React, Tailwind CSS, React Flow dashboard.
+- `docs/screenshots`: captured reviewer screenshots from the Docker demo seed.
 - `docker-compose.yml`: Postgres, Redis, API, worker, frontend.
 - `.env.example`: all runtime configuration without secrets.
 
@@ -87,6 +97,29 @@ Use `demo@example.com` / `Password123!`, then check:
 - Telemetry: LLM call/token aggregates grouped by operation.
 - Queues: Bull Board at `http://localhost:3000/admin/queues`.
 
+## Screenshots
+
+The repository includes reviewer screenshots generated from the Docker demo seed. Refresh them with `npm run screenshots` while the stack is running.
+
+- [Articles feed](docs/screenshots/articles.png)
+- [Article detail](docs/screenshots/article-detail.png)
+- [Graph](docs/screenshots/graph.png)
+- [Settings](docs/screenshots/settings.png)
+- [Digests](docs/screenshots/digests.png)
+- [Telemetry](docs/screenshots/telemetry.png)
+
+## Reviewer Scorecard
+
+| Gate / scoring area | Where to verify |
+| --- | --- |
+| One-command startup | `.env.example`, `docker-compose.yml`, Run |
+| Auth and tenant isolation | Auth UI, protected API routes, `apps/server/src/auth`, Prisma `userId` scopes |
+| RSS and queues | Feeds page, workers, Bull Board |
+| LLM boundary and cost control | Worker pipeline, LLM adapters, telemetry |
+| Graph | Graph page, graph service, React Flow UI |
+| Settings/regeneration | Settings page and regeneration queue |
+| Quality gates | Useful checks |
+
 ## Acceptance Walkthrough
 
 1. Copy `.env.example` to `.env` and keep the demo defaults or fill real provider keys.
@@ -100,7 +133,7 @@ Use `demo@example.com` / `Password123!`, then check:
 9. Build a daily digest and inspect Digests.
 10. Open Telemetry and confirm token/call aggregates.
 11. Open Bull Board with `BULL_BOARD_USER` / `BULL_BOARD_PASSWORD`.
-12. Run `npm run lint`, `npm run test`, and `npm run check:unicode` before submitting.
+12. Run the Useful checks before submitting.
 
 ## Implemented Scope
 
