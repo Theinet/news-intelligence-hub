@@ -1,6 +1,7 @@
 import {
   Activity,
   BookOpen,
+  ExternalLink,
   Eye,
   GitBranch,
   LogOut,
@@ -15,6 +16,8 @@ import {useCallback, useEffect, useMemo, useState} from 'react';
 import ReactFlow, {applyNodeChanges, Background, Controls, Edge, Node, NodeChange, Panel} from 'reactflow';
 
 const apiUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
+const showQueueLink = import.meta.env.VITE_SHOW_QUEUE_LINK === 'true';
+const REGENERATION_STORAGE_KEY = 'nih_regeneration_id';
 
 type View = 'articles' | 'feeds' | 'graph' | 'settings' | 'digests' | 'telemetry';
 type JsonRecord = Record<string, unknown>;
@@ -23,6 +26,15 @@ interface ApiErrorBody {
   message?: string | string[];
   error?: string;
   statusCode?: number;
+}
+
+interface SimilarArticle {
+  id: string;
+  title: string;
+  publishedAt: string;
+  feed?: {title?: string};
+  feedTitle?: string | null;
+  similarityScore?: number | null;
 }
 
 interface Article extends JsonRecord {
@@ -36,6 +48,7 @@ interface Article extends JsonRecord {
   categories: string[];
   axes: Record<string, string>;
   similarCount: number;
+  similar?: SimilarArticle[];
   feed?: {title?: string};
   mentions?: Array<{entity: Entity}>;
 }
@@ -51,6 +64,7 @@ interface Entity extends JsonRecord {
 interface EntityDetail extends Entity {
   mentions?: Array<{article: {id: string; title: string; publishedAt: string; summary?: string}}>;
   related?: Array<{entity?: Entity; weight: number}>;
+  activity?: Array<{publishedAt: string; _count: {_all: number}}>;
 }
 
 interface Feed extends JsonRecord {
@@ -136,6 +150,22 @@ interface AuthMessage {
   href?: string;
 }
 
+function decodeHtmlEntities(value: string): string {
+  if (!value.includes('&')) {
+    return value;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = value;
+  return textarea.value;
+}
+
+function displayText(value: string | null | undefined): string {
+  if (!value) {
+    return '';
+  }
+  return decodeHtmlEntities(value);
+}
+
 function makeNotice(kind: Notice['kind'], text: string): Notice {
   return {
     id: `${Date.now()}-${Math.random()}`,
@@ -148,6 +178,7 @@ function App() {
   const [token, setToken] = useState(localStorage.getItem('nih_token') ?? '');
   const [view, setView] = useState<View>('articles');
   const [authMessage, setAuthMessage] = useState<AuthMessage | null>(null);
+  const [regeneration, setRegeneration] = useState<RegenerationRun | null>(null);
 
   const request = useCallback(async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
     const response = await fetch(`${apiUrl}${path}`, {
@@ -172,6 +203,60 @@ function App() {
   useEffect(() => {
     localStorage.setItem('nih_token', token);
   }, [token]);
+
+  useEffect(() => {
+    if (!token) {
+      setRegeneration(null);
+      sessionStorage.removeItem(REGENERATION_STORAGE_KEY);
+      return;
+    }
+    const storedId = sessionStorage.getItem(REGENERATION_STORAGE_KEY);
+    if (storedId) {
+      request<RegenerationRun | null>(`/regenerations/${storedId}`)
+        .then((run) => {
+          if (run && ['queued', 'running'].includes(run.status)) {
+            setRegeneration(run);
+          } else {
+            sessionStorage.removeItem(REGENERATION_STORAGE_KEY);
+          }
+        })
+        .catch(() => sessionStorage.removeItem(REGENERATION_STORAGE_KEY));
+      return;
+    }
+    request<RegenerationRun | null>('/regenerations/active')
+      .then((run) => {
+        if (run) {
+          setRegeneration(run);
+          sessionStorage.setItem(REGENERATION_STORAGE_KEY, run.id);
+        }
+      })
+      .catch(() => undefined);
+  }, [token, request]);
+
+  useEffect(() => {
+    if (!regeneration || !['queued', 'running'].includes(regeneration.status)) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      request<RegenerationRun>(`/regenerations/${regeneration.id}`)
+        .then((run) => {
+          setRegeneration(run);
+          if (['done', 'failed'].includes(run.status)) {
+            sessionStorage.removeItem(REGENERATION_STORAGE_KEY);
+          }
+        })
+        .catch(() => {
+          sessionStorage.removeItem(REGENERATION_STORAGE_KEY);
+          setRegeneration((current) => current ? {...current, status: 'failed'} : current);
+        });
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [regeneration, request]);
+
+  function handleRegenerationStart(run: RegenerationRun) {
+    setRegeneration(run);
+    sessionStorage.setItem(REGENERATION_STORAGE_KEY, run.id);
+  }
 
   if (location.pathname === '/verify') {
     return <Verify request={request} />;
@@ -212,6 +297,18 @@ function App() {
                 <span>{label}</span>
               </button>
             ))}
+            {showQueueLink && (
+              <a
+                className="flex h-10 items-center gap-2 rounded-md border border-line bg-white px-3 text-sm hover:border-accent hover:text-accent"
+                href={`${apiUrl}/admin/queues`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Queue Monitor"
+              >
+                <ExternalLink size={16} />
+                <span>Queue Monitor</span>
+              </a>
+            )}
             <button
               className="flex h-10 items-center gap-2 rounded-md border border-line bg-white px-3 text-sm"
               onClick={() => setToken('')}
@@ -223,11 +320,36 @@ function App() {
           </nav>
         </div>
       </header>
+      {regeneration && ['queued', 'running'].includes(regeneration.status) && (
+        <div className="border-b border-line bg-teal-50">
+          <div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-medium text-accent">Regeneration in progress</p>
+              <p className="text-xs text-slate-600">
+                {regenerationStatusText(regeneration)} — {regeneration.processed} of {regeneration.total} articles
+              </p>
+            </div>
+            <div className="h-2 w-full max-w-xs overflow-hidden rounded bg-white sm:mt-0">
+              <div
+                className="h-full bg-accent"
+                style={{width: `${progressPercent(regeneration)}%`}}
+              />
+            </div>
+          </div>
+        </div>
+      )}
       <main className="mx-auto max-w-7xl px-4 py-5">
         {view === 'articles' && <Articles request={request} />}
         {view === 'feeds' && <Feeds request={request} />}
         {view === 'graph' && <Graph request={request} />}
-        {view === 'settings' && <SettingsView request={request} />}
+        {view === 'settings' && (
+          <SettingsView
+            request={request}
+            regeneration={regeneration}
+            onRegenerationStart={handleRegenerationStart}
+            onRegenerationUpdate={setRegeneration}
+          />
+        )}
         {view === 'digests' && <Digests request={request} />}
         {view === 'telemetry' && <Telemetry request={request} />}
       </main>
@@ -309,30 +431,72 @@ function AuthScreen(props: {
   const [password, setPassword] = useState('Password123!');
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [resending, setResending] = useState(false);
   const isLogin = mode === 'login';
+  const showResend = isLogin && props.message?.kind === 'error' && props.message.text.includes('not verified');
 
   async function submit() {
     props.setMessage(null);
-    const response = await fetch(`${apiUrl}/auth/${mode}`, {
-      method: 'POST',
-      headers: {'content-type': 'application/json'},
-      body: JSON.stringify({email: email.trim(), password})
-    });
-    const data = await response.json() as ApiErrorBody & {accessToken?: string; devVerifyUrl?: string};
-    if (!response.ok) {
-      props.setMessage({kind: 'error', text: formatAuthError(data)});
-      return;
+    setSubmitting(true);
+    try {
+      const response = await fetch(`${apiUrl}/auth/${mode}`, {
+        method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({email: email.trim(), password})
+      });
+      const data = await response.json() as ApiErrorBody & {accessToken?: string; devVerifyUrl?: string};
+      if (!response.ok) {
+        props.setMessage({kind: 'error', text: formatAuthError(data)});
+        return;
+      }
+      if (mode === 'login') {
+        props.setToken(data.accessToken ?? '');
+      } else {
+        props.setMessage({
+          kind: 'info',
+          text: data.devVerifyUrl
+            ? 'DEV MODE verification link created.'
+            : 'Registration created. Check service logs for the DEV MODE verification link.',
+          href: data.devVerifyUrl
+        });
+      }
+    } catch (error) {
+      props.setMessage({
+        kind: 'error',
+        text: error instanceof Error ? error.message : 'Unable to complete authentication.'
+      });
+    } finally {
+      setSubmitting(false);
     }
-    if (mode === 'login') {
-      props.setToken(data.accessToken ?? '');
-    } else {
+  }
+
+  async function resendVerification() {
+    setResending(true);
+    props.setMessage(null);
+    try {
+      const response = await fetch(`${apiUrl}/auth/resend`, {
+        method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({email: email.trim()})
+      });
+      const data = await response.json() as ApiErrorBody & {devVerifyUrl?: string};
+      if (!response.ok) {
+        props.setMessage({kind: 'error', text: formatAuthError(data)});
+        return;
+      }
       props.setMessage({
         kind: 'info',
-        text: data.devVerifyUrl
-          ? 'DEV MODE verification link created.'
-          : 'Registration created. Check service logs for the DEV MODE verification link.',
+        text: 'Verification email resent. Open the DEV MODE link below.',
         href: data.devVerifyUrl
       });
+    } catch (error) {
+      props.setMessage({
+        kind: 'error',
+        text: error instanceof Error ? error.message : 'Unable to resend verification email.'
+      });
+    } finally {
+      setResending(false);
     }
   }
 
@@ -393,12 +557,25 @@ function AuthScreen(props: {
               <Eye size={16} />
             </button>
           </div>
-          <button className="rounded-md bg-accent px-4 py-2 text-white" onClick={submit}>
-            {isLogin ? 'Login' : 'Register'}
+          <button
+            className="rounded-md bg-accent px-4 py-2 text-white disabled:opacity-60"
+            onClick={() => void submit()}
+            disabled={submitting}
+          >
+            {submitting ? 'Please wait...' : isLogin ? 'Login' : 'Register'}
           </button>
           <button className="text-left text-sm text-accent" onClick={() => setMode(isLogin ? 'register' : 'login')}>
             {isLogin ? 'Create account' : 'Use existing account'}
           </button>
+          {showResend && (
+            <button
+              className="text-left text-sm text-accent disabled:opacity-60"
+              onClick={() => void resendVerification()}
+              disabled={resending}
+            >
+              {resending ? 'Sending...' : 'Resend verification email'}
+            </button>
+          )}
           {props.message && (
             <div
               className={`rounded-md border p-3 text-sm ${
@@ -410,7 +587,12 @@ function AuthScreen(props: {
               <p>{props.message.text}</p>
               {props.message.href && (
                 <>
-                  <a className="mt-2 inline-block font-medium underline" href={props.message.href}>
+                  <a
+                    className="mt-2 inline-block font-medium underline"
+                    href={props.message.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
                     Open verification link
                   </a>
                   <span className="mt-1 block break-all text-xs text-slate-600">{props.message.href}</span>
@@ -448,14 +630,35 @@ function formatApiErrorText(text: string): string {
 }
 
 function Verify({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
-  const [state, setState] = useState('Verifying email...');
+  const [state, setState] = useState<'loading' | 'success' | 'error'>('loading');
+  const [message, setMessage] = useState('Verifying email...');
   useEffect(() => {
     const token = new URLSearchParams(location.search).get('token');
-    request(`/auth/verify?token=${token}`).then(() => setState('Email verified. You can log in now.')).catch((error) => {
-      setState(error.message);
-    });
+    request(`/auth/verify?token=${token}`)
+      .then(() => {
+        setState('success');
+        setMessage('Email verified successfully');
+      })
+      .catch((error) => {
+        setState('error');
+        setMessage(error instanceof Error ? error.message : 'Verification failed.');
+      });
   }, [request]);
-  return <main className="grid min-h-screen place-items-center text-lg">{state}</main>;
+  return (
+    <main className="mx-auto grid min-h-screen max-w-md place-items-center px-4">
+      <section className="w-full rounded-lg border border-line bg-white p-6 text-center shadow-sm">
+        <p className={`text-lg ${state === 'error' ? 'text-red-700' : 'text-slate-900'}`}>{message}</p>
+        {state === 'success' && (
+          <a
+            className="mt-4 inline-block rounded-md bg-accent px-4 py-2 text-white"
+            href="/"
+          >
+            Go to Login
+          </a>
+        )}
+      </section>
+    </main>
+  );
 }
 
 function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
@@ -514,7 +717,7 @@ function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
             onChange={(event) => setFilters({...filters, feedId: event.target.value})}
           >
             <option value="">All feeds</option>
-            {feeds.map((feed) => <option key={feed.id} value={feed.id}>{feed.title ?? feed.url}</option>)}
+            {feeds.map((feed) => <option key={feed.id} value={feed.id}>{displayText(feed.title) || feed.url}</option>)}
           </select>
           <select
             className="h-10 rounded-md border border-line px-3"
@@ -563,13 +766,13 @@ function Articles({request}: {request: <T>(path: string) => Promise<T>}) {
           {!loading && !loadError && articles.map((article) => (
             <button key={article.id} className="rounded-lg border border-line bg-white p-4 text-left shadow-sm" onClick={() => setSelected(article)}>
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                <span>{article.feed?.title ?? 'Source'}</span>
+                <span>{displayText(article.feed?.title) || 'Source'}</span>
                 <span>{new Date(article.publishedAt).toLocaleString()}</span>
                 <span className="rounded bg-slate-100 px-2 py-1">{article.importance}</span>
                 <span>{article.similarCount} similar</span>
               </div>
-              <h2 className="mt-2 text-base font-semibold">{article.title}</h2>
-              <p className="mt-2 line-clamp-2 text-sm text-slate-600">{article.summary}</p>
+              <h2 className="mt-2 text-base font-semibold">{displayText(article.title)}</h2>
+              <p className="mt-2 line-clamp-2 text-sm text-slate-600">{displayText(article.summary)}</p>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 {(article.mentions ?? []).map(({entity}) => <span key={entity.id} className="rounded bg-teal-50 px-2 py-1 text-accent">{entity.canonicalName}</span>)}
               </div>
@@ -611,6 +814,67 @@ function pluralize(count: number, singular: string, plural: string): string {
   return count === 1 ? singular : plural;
 }
 
+function ActivityChart({activity}: {activity: Array<{publishedAt: string; _count: {_all: number}}>}) {
+  const buckets = useMemo(() => {
+    const byDay = new Map<string, number>();
+    for (const row of activity) {
+      const day = new Date(row.publishedAt).toLocaleDateString();
+      byDay.set(day, (byDay.get(day) ?? 0) + (row._count._all ?? 0));
+    }
+    return Array.from(byDay.entries())
+      .sort(([left], [right]) => new Date(left).getTime() - new Date(right).getTime())
+      .slice(-14);
+  }, [activity]);
+  if (buckets.length === 0) {
+    return <p className="text-xs text-slate-500">No mention activity yet.</p>;
+  }
+  const max = Math.max(...buckets.map(([, count]) => count), 1);
+  return (
+    <div className="mt-2 grid gap-1">
+      <div className="flex items-end gap-1" style={{height: '72px'}}>
+        {buckets.map(([day, count]) => (
+          <div key={day} className="flex flex-1 flex-col items-center justify-end gap-1" title={`${day}: ${count}`}>
+            <div className="w-full rounded-t bg-accent/80" style={{height: `${Math.max(8, (count / max) * 100)}%`}} />
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-between text-[10px] text-slate-500">
+        <span>{buckets[0]?.[0]}</span>
+        <span>{buckets[buckets.length - 1]?.[0]}</span>
+      </div>
+    </div>
+  );
+}
+
+function SimilarArticlesBlock({similar}: {similar?: SimilarArticle[]}) {
+  const items = similar ?? [];
+  return (
+    <div className="rounded-md border border-line bg-panel p-3">
+      <h3 className="text-xs font-semibold uppercase tracking-normal text-slate-500">Similar / Duplicate Articles</h3>
+      {items.length === 0 ? (
+        <p className="mt-2 text-sm text-slate-500">No similar articles found</p>
+      ) : (
+        <div className="mt-2 grid gap-2">
+          {items.map((item) => (
+            <div key={item.id} className="rounded bg-white p-2 text-xs">
+              <p className="font-medium">{displayText(item.title)}</p>
+              <div className="mt-1 flex flex-wrap gap-2 text-slate-500">
+                <span>{displayText(item.feed?.title ?? item.feedTitle) || 'Unknown feed'}</span>
+                <span>{new Date(item.publishedAt).toLocaleString()}</span>
+                {item.similarityScore != null && (
+                  <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-700">
+                    score {item.similarityScore.toFixed(2)}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ArticleDetail({article, request}: {article: Article; request: <T>(path: string) => Promise<T>}) {
   const [full, setFull] = useState<Article>(article);
   const [entityDetail, setEntityDetail] = useState<EntityDetail | null>(null);
@@ -622,8 +886,8 @@ function ArticleDetail({article, request}: {article: Article; request: <T>(path:
   }, [article.id, request]);
   return (
     <div className="grid gap-3">
-      <h2 className="text-lg font-semibold">{full.title}</h2>
-      <p className="text-sm text-slate-700">{full.fullSummary ?? full.summary}</p>
+      <h2 className="text-lg font-semibold">{displayText(full.title)}</h2>
+      <p className="text-sm text-slate-700">{displayText(full.fullSummary ?? full.summary)}</p>
       {canOpenOriginal ? (
         <a className="text-sm text-accent" href={originalUrl} target="_blank">Open original</a>
       ) : (
@@ -656,6 +920,7 @@ function ArticleDetail({article, request}: {article: Article; request: <T>(path:
           )) : <span className="text-xs text-slate-500">None</span>}
         </div>
       </div>
+      <SimilarArticlesBlock similar={full.similar} />
       {entityDetail && (
         <div className="rounded-md border border-line bg-panel p-3">
           <div className="flex items-start justify-between gap-3">
@@ -675,6 +940,12 @@ function ArticleDetail({article, request}: {article: Article; request: <T>(path:
               Aliases: {entityDetail.aliases.join(', ')}
             </p>
           )}
+          {(entityDetail.activity?.length ?? 0) > 0 && (
+            <div className="mt-3">
+              <h4 className="text-xs font-semibold uppercase tracking-normal text-slate-500">Mentions over time</h4>
+              <ActivityChart activity={entityDetail.activity ?? []} />
+            </div>
+          )}
           {(entityDetail.related?.length ?? 0) > 0 && (
             <div className="mt-3">
               <h4 className="text-xs font-semibold uppercase tracking-normal text-slate-500">Related</h4>
@@ -693,7 +964,7 @@ function ArticleDetail({article, request}: {article: Article; request: <T>(path:
               <div className="mt-2 grid gap-2">
                 {entityDetail.mentions?.slice(0, 4).map(({article: mentionedArticle}) => (
                   <div key={mentionedArticle.id} className="rounded bg-white p-2 text-xs">
-                    <p className="font-medium">{mentionedArticle.title}</p>
+                    <p className="font-medium">{displayText(mentionedArticle.title)}</p>
                     <p className="text-slate-500">{new Date(mentionedArticle.publishedAt).toLocaleString()}</p>
                   </div>
                 ))}
@@ -711,6 +982,7 @@ function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Pro
   const [url, setUrl] = useState('');
   const [message, setMessage] = useState<Notice | null>(null);
   const [busyId, setBusyId] = useState('');
+  const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const load = useCallback(async () => {
@@ -736,6 +1008,7 @@ function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Pro
   }, [message]);
   async function add() {
     setMessage(null);
+    setAdding(true);
     try {
       await request('/feeds', {method: 'POST', body: JSON.stringify({url})});
       setUrl('');
@@ -743,6 +1016,8 @@ function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Pro
       setMessage(makeNotice('info', 'Feed added and queued for pulling.'));
     } catch (error) {
       setMessage(makeNotice('error', error instanceof Error ? error.message : 'Unable to add feed.'));
+    } finally {
+      setAdding(false);
     }
   }
   async function runFeedAction(feedId: string, action: 'pull' | 'pause' | 'resume' | 'delete') {
@@ -768,7 +1043,13 @@ function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Pro
     <section>
       <Toolbar>
         <input className="h-10 min-w-72 rounded-md border border-line px-3" placeholder="RSS or Atom URL" value={url} onChange={(e) => setUrl(e.target.value)} />
-        <button className="flex h-10 items-center gap-2 rounded-md bg-accent px-3 text-white" onClick={add}><Plus size={16} />Add</button>
+        <button
+          className="flex h-10 items-center gap-2 rounded-md bg-accent px-3 text-white disabled:opacity-60"
+          onClick={() => void add()}
+          disabled={adding}
+        >
+          <Plus size={16} />{adding ? 'Adding...' : 'Add'}
+        </button>
       </Toolbar>
       <Toast key={message?.id ?? 'feeds-toast'} notice={message} />
       {loading && <div className="mt-4"><LoadingBlock text="Loading feeds..." /></div>}
@@ -786,7 +1067,7 @@ function Feeds({request}: {request: <T>(path: string, init?: RequestInit) => Pro
           <div key={feed.id} className="rounded-lg border border-line bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="font-semibold">{feed.title ?? feed.url}</h2>
+                <h2 className="font-semibold">{displayText(feed.title) || feed.url}</h2>
                 <p className="break-all text-sm text-slate-500">{feed.url}</p>
               </div>
               <span className="rounded bg-slate-100 px-2 py-1 text-xs">{feed.status}</span>
@@ -839,12 +1120,15 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
   const [edgeMode, setEdgeMode] = useState<'core' | 'all' | 'similar'>('core');
   const [category, setCategory] = useState('');
   const [search, setSearch] = useState('');
+  const [timeWindow, setTimeWindow] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [selectedNode, setSelectedNode] = useState<JsonRecord | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<Article | EntityDetail | null>(null);
   const loadGraph = useCallback(() => {
-    const params = new URLSearchParams(Object.entries({nodeKind, category, q: search}).filter(([, value]) => value));
+    const params = new URLSearchParams(
+      Object.entries({nodeKind, category, q: search, timeWindow}).filter(([, value]) => value)
+    );
     setLoading(true);
     setLoadError('');
     request<{nodes: JsonRecord[]; edges: JsonRecord[]}>(`/graph?${params}`)
@@ -853,7 +1137,7 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
         setLoadError(errorMessage(error, 'Unable to load graph.'));
       })
       .finally(() => setLoading(false));
-  }, [category, nodeKind, request, search]);
+  }, [category, nodeKind, request, search, timeWindow]);
   useEffect(() => {
     loadGraph();
   }, [loadGraph]);
@@ -871,7 +1155,7 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
         return {
           id,
           position: positionsById.get(id) ?? {x: (index % 6) * 210, y: Math.floor(index / 6) * 120},
-          data: {label: `${node.kind}: ${node.label}`},
+          data: {label: `${node.kind}: ${displayText(String(node.label))}`},
           style: {borderColor: node.kind === 'article' ? '#0f766e' : '#64748b'}
         };
       });
@@ -907,7 +1191,7 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
     })
     .filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)),
   [edgeMode, graph.edges, visibleNodeIds]);
-  const hasGraphFilters = Boolean(nodeKind || category.trim() || search.trim());
+  const hasGraphFilters = Boolean(nodeKind || category.trim() || search.trim() || timeWindow);
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     setNodes((currentNodes) => applyNodeChanges(changes, currentNodes));
   }, []);
@@ -935,6 +1219,12 @@ function Graph({request}: {request: <T>(path: string) => Promise<T>}) {
           </select>
           <input className="h-10 rounded-md border border-line px-3" placeholder="Search graph" value={search} onChange={(e) => setSearch(e.target.value)} />
           <input className="h-10 rounded-md border border-line px-3" placeholder="Category" value={category} onChange={(e) => setCategory(e.target.value)} />
+          <select className="h-10 rounded-md border border-line px-3" value={timeWindow} onChange={(e) => setTimeWindow(e.target.value)}>
+            <option value="">All time</option>
+            <option value="1d">Last day</option>
+            <option value="7d">Last week</option>
+            <option value="30d">Last month</option>
+          </select>
           <select className="h-10 rounded-md border border-line px-3" value={edgeMode} onChange={(e) => setEdgeMode(e.target.value as 'core' | 'all' | 'similar')}>
             <option value="core">Core links</option>
             <option value="all">All links</option>
@@ -1048,7 +1338,7 @@ function GraphNodeDetails(props: {node: JsonRecord; detail: Article | EntityDeta
     return (
       <div className="grid gap-2">
         <p className="text-xs uppercase tracking-normal text-slate-500">{kind}</p>
-        <h2 className="font-semibold">{String(props.node.label)}</h2>
+        <h2 className="font-semibold">{displayText(String(props.node.label))}</h2>
         <p className="text-sm text-slate-500">Loading details...</p>
       </div>
     );
@@ -1058,8 +1348,8 @@ function GraphNodeDetails(props: {node: JsonRecord; detail: Article | EntityDeta
     return (
       <div className="grid gap-3">
         <p className="text-xs uppercase tracking-normal text-slate-500">Article</p>
-        <h2 className="font-semibold">{article.title}</h2>
-        <p className="text-sm text-slate-700">{article.fullSummary ?? article.summary}</p>
+        <h2 className="font-semibold">{displayText(article.title)}</h2>
+        <p className="text-sm text-slate-700">{displayText(article.fullSummary ?? article.summary)}</p>
         <div className="flex flex-wrap gap-2 text-xs">
           <span className="rounded bg-slate-100 px-2 py-1">{article.importance}</span>
           <span className="rounded bg-slate-100 px-2 py-1">{article.status}</span>
@@ -1086,6 +1376,12 @@ function GraphNodeDetails(props: {node: JsonRecord; detail: Article | EntityDeta
       </div>
       {entity.description && <p className="text-sm text-slate-700">{entity.description}</p>}
       {(entity.aliases?.length ?? 0) > 0 && <p className="text-xs text-slate-500">Aliases: {entity.aliases.join(', ')}</p>}
+      {(entity.activity?.length ?? 0) > 0 && (
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-normal text-slate-500">Mentions over time</h3>
+          <ActivityChart activity={entity.activity ?? []} />
+        </div>
+      )}
       {(entity.related?.length ?? 0) > 0 && (
         <div>
           <h3 className="text-xs font-semibold uppercase tracking-normal text-slate-500">Related</h3>
@@ -1102,7 +1398,7 @@ function GraphNodeDetails(props: {node: JsonRecord; detail: Article | EntityDeta
           <div className="mt-2 grid gap-2">
             {entity.mentions?.slice(0, 5).map(({article}) => (
               <div key={article.id} className="rounded bg-panel p-2 text-xs">
-                <p className="font-medium">{article.title}</p>
+                <p className="font-medium">{displayText(article.title)}</p>
                 <p className="text-slate-500">{new Date(article.publishedAt).toLocaleString()}</p>
               </div>
             ))}
@@ -1113,16 +1409,22 @@ function GraphNodeDetails(props: {node: JsonRecord; detail: Article | EntityDeta
   );
 }
 
-function SettingsView({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
+function SettingsView(props: {
+  request: <T>(path: string, init?: RequestInit) => Promise<T>;
+  regeneration: RegenerationRun | null;
+  onRegenerationStart: (run: RegenerationRun) => void;
+  onRegenerationUpdate: (run: RegenerationRun | null) => void;
+}) {
+  const {request, regeneration, onRegenerationStart, onRegenerationUpdate} = props;
   const [categories, setCategories] = useState<Category[]>([]);
   const [axes, setAxes] = useState<Axis[]>([]);
   const [categoryName, setCategoryName] = useState('');
   const [axisName, setAxisName] = useState('');
   const [axisValues, setAxisValues] = useState('');
   const [message, setMessage] = useState<Notice | null>(null);
-  const [regeneration, setRegeneration] = useState<RegenerationRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [regenerating, setRegenerating] = useState(false);
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError('');
@@ -1150,27 +1452,13 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
     return () => window.clearTimeout(timer);
   }, [message]);
   useEffect(() => {
-    if (!regeneration || !['queued', 'running'].includes(regeneration.status)) {
-      return undefined;
-    }
-    const timer = window.setInterval(() => {
-      request<RegenerationRun>(`/regenerations/${regeneration.id}`)
-        .then(setRegeneration)
-        .catch((error) => {
-          setMessage(makeNotice('error', errorMessage(error, 'Unable to refresh regeneration status.')));
-          setRegeneration((current) => current ? {...current, status: 'failed'} : current);
-        });
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [regeneration, request]);
-  useEffect(() => {
     if (regeneration?.status !== 'done') {
       return undefined;
     }
     setMessage(makeNotice('info', 'Regeneration completed.'));
-    const timer = window.setTimeout(() => setRegeneration(null), 3000);
+    const timer = window.setTimeout(() => onRegenerationUpdate(null), 3000);
     return () => window.clearTimeout(timer);
-  }, [regeneration?.status]);
+  }, [regeneration?.status, onRegenerationUpdate]);
 
   async function addCategory() {
     const name = categoryName.trim();
@@ -1258,12 +1546,15 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
   }
 
   async function regenerate() {
+    setRegenerating(true);
     try {
       const run = await request<RegenerationRun>('/regenerations', {method: 'POST'});
-      setRegeneration(run);
+      onRegenerationStart(run);
       setMessage(makeNotice('info', 'Regeneration queued.'));
     } catch (error) {
       setMessage(makeNotice('error', errorMessage(error, 'Unable to queue regeneration.')));
+    } finally {
+      setRegenerating(false);
     }
   }
   return (
@@ -1330,7 +1621,13 @@ function SettingsView({request}: {request: <T>(path: string, init?: RequestInit)
       <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-semibold">Categorization axes</h2>
-          <button className="flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm" onClick={regenerate}><RefreshCw size={16} />Regenerate</button>
+          <button
+            className="flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm disabled:opacity-60"
+            onClick={() => void regenerate()}
+            disabled={regenerating || Boolean(regeneration && ['queued', 'running'].includes(regeneration.status))}
+          >
+            <RefreshCw size={16} />{regenerating ? 'Queueing...' : 'Regenerate'}
+          </button>
         </div>
         <div className="mt-3 grid gap-2 rounded-md border border-line p-3">
           <input
@@ -1581,7 +1878,7 @@ function DigestCard({digest, entityNames}: {digest: Digest; entityNames: string[
           {digest.error ?? 'Digest build failed.'}
         </p>
       )}
-      {digest.summary && <p className="mt-3 text-sm text-slate-700">{digest.summary}</p>}
+      {digest.summary && <p className="mt-3 text-sm text-slate-700">{displayText(String(digest.summary))}</p>}
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <DigestCountList title="Top entities" items={topEntities} emptyText="No entities in this period." />
         <DigestCountList title="Top categories" items={topCategories} emptyText="No categories in this period." />
@@ -1592,8 +1889,8 @@ function DigestCard({digest, entityNames}: {digest: Digest; entityNames: string[
           {keyArticles.length === 0 && <p className="text-sm text-slate-500">No key articles in this period.</p>}
           {keyArticles.map((article) => (
             <div key={article.id} className="rounded bg-panel p-3 text-sm">
-              <p className="font-medium">{article.title}</p>
-              {article.summary && <p className="mt-1 line-clamp-2 text-slate-600">{article.summary}</p>}
+              <p className="font-medium">{displayText(article.title)}</p>
+              {article.summary && <p className="mt-1 line-clamp-2 text-slate-600">{displayText(article.summary)}</p>}
             </div>
           ))}
         </div>

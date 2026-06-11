@@ -2,7 +2,7 @@ import {Injectable} from '@nestjs/common';
 import Parser from 'rss-parser';
 import {sha256, normalizeUrl} from '../common/hash';
 import {PrismaService} from '../common/prisma.service';
-import {stripHtml} from '../common/text';
+import {decodeHtmlEntities, stripHtml} from '../common/text';
 import {QueuesService} from './queues.service';
 
 @Injectable()
@@ -38,7 +38,7 @@ export class FeedPullerService {
           create: {
             userId,
             feedId: feed.id,
-            title: item.title ?? 'Untitled article',
+            title: decodeHtmlEntities(item.title ?? 'Untitled article'),
             url,
             normalizedUrl: normalizeUrl(url),
             author: item.creator ?? item.author,
