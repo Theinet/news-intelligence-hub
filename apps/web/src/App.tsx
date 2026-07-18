@@ -4,16 +4,22 @@ import {
   ExternalLink,
   Eye,
   GitBranch,
+  Github,
+  Linkedin,
   LogOut,
+  Mail,
   Plus,
+  QrCode,
   RefreshCw,
   Rss,
   Settings,
   ShieldCheck,
-  Trash2
+  Trash2,
+  Youtube
 } from 'lucide-react';
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import ReactFlow, {applyNodeChanges, Background, Controls, Edge, Node, NodeChange, Panel} from 'reactflow';
+import {Language, translate} from './i18n';
 
 const apiUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 const showQueueLink = import.meta.env.VITE_SHOW_QUEUE_LINK === 'true';
@@ -175,6 +181,8 @@ function makeNotice(kind: Notice['kind'], text: string): Notice {
 }
 
 function App() {
+  const [language, setLanguage] = useState<Language>(() => localStorage.getItem('nih_language') === 'uk' ? 'uk' : 'en');
+  const t = (value: string) => translate(language, value);
   const [token, setToken] = useState(localStorage.getItem('nih_token') ?? '');
   const [view, setView] = useState<View>('articles');
   const [authMessage, setAuthMessage] = useState<AuthMessage | null>(null);
@@ -203,6 +211,11 @@ function App() {
   useEffect(() => {
     localStorage.setItem('nih_token', token);
   }, [token]);
+
+  useEffect(() => {
+    localStorage.setItem('nih_language', language);
+    document.documentElement.lang = language;
+  }, [language]);
 
   useEffect(() => {
     if (!token) {
@@ -259,11 +272,11 @@ function App() {
   }
 
   if (location.pathname === '/verify') {
-    return <Verify request={request} />;
+    return <Verify request={request} language={language} setLanguage={setLanguage} />;
   }
 
   if (!token) {
-    return <AuthScreen setToken={setToken} setMessage={setAuthMessage} message={authMessage} />;
+    return <AuthScreen setToken={setToken} setMessage={setAuthMessage} message={authMessage} language={language} setLanguage={setLanguage} />;
   }
 
   const nav = [
@@ -276,13 +289,10 @@ function App() {
   ] as const;
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <header className="border-b border-line bg-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 md:flex-row md:items-center">
-          <div>
-            <h1 className="text-xl font-semibold tracking-normal">News Intelligence Hub</h1>
-            <p className="text-sm text-slate-600">RSS analysis through deterministic queues and semantic graphing.</p>
-          </div>
+          <BrandLink />
           <nav className="flex flex-wrap gap-2 md:ml-auto">
             {nav.map(([id, Icon, label]) => (
               <button
@@ -291,10 +301,10 @@ function App() {
                   view === id ? 'border-accent bg-teal-50 text-accent' : 'border-line bg-white'
                 }`}
                 onClick={() => setView(id)}
-                title={label}
+                title={t(label)}
               >
                 <Icon size={16} />
-                <span>{label}</span>
+                <span>{t(label)}</span>
               </button>
             ))}
             {showQueueLink && (
@@ -303,20 +313,21 @@ function App() {
                 href={`${apiUrl}/admin/queues`}
                 target="_blank"
                 rel="noopener noreferrer"
-                title="Queue Monitor"
+                title={t('Queue Monitor')}
               >
                 <ExternalLink size={16} />
-                <span>Queue Monitor</span>
+                <span>{t('Queue Monitor')}</span>
               </a>
             )}
             <button
               className="flex h-10 items-center gap-2 rounded-md border border-line bg-white px-3 text-sm"
               onClick={() => setToken('')}
-              title="Log out"
+              title={t('Log out')}
             >
               <LogOut size={16} />
-              <span>Logout</span>
+              <span>{t('Logout')}</span>
             </button>
+            <LanguageSwitch language={language} setLanguage={setLanguage} />
           </nav>
         </div>
       </header>
@@ -324,7 +335,7 @@ function App() {
         <div className="border-b border-line bg-teal-50">
           <div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-medium text-accent">Regeneration in progress</p>
+              <p className="text-sm font-medium text-accent">{t('Regeneration in progress')}</p>
               <p className="text-xs text-slate-600">
                 {regenerationStatusText(regeneration)} — {regeneration.processed} of {regeneration.total} articles
               </p>
@@ -338,7 +349,7 @@ function App() {
           </div>
         </div>
       )}
-      <main className="mx-auto max-w-7xl px-4 py-5">
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-5">
         {view === 'articles' && <Articles request={request} />}
         {view === 'feeds' && <Feeds request={request} />}
         {view === 'graph' && <Graph request={request} />}
@@ -353,7 +364,83 @@ function App() {
         {view === 'digests' && <Digests request={request} />}
         {view === 'telemetry' && <Telemetry request={request} />}
       </main>
+      <Footer language={language} />
     </div>
+  );
+}
+
+function LanguageSwitch({language, setLanguage}: {language: Language; setLanguage: (language: Language) => void}) {
+  return (
+    <div className="flex h-10 items-center rounded-md border border-line bg-white p-1" aria-label={translate(language, 'Language')}>
+      {(['en', 'uk'] as const).map((item) => (
+        <button
+          key={item}
+          className={`h-8 rounded px-2 text-xs font-semibold transition-colors ${language === item ? 'bg-accent text-white' : 'text-slate-600 hover:text-accent'}`}
+          onClick={() => setLanguage(item)}
+          aria-pressed={language === item}
+          title={item === 'en' ? 'English' : 'Українська'}
+        >
+          {item.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function BrandLink() {
+  return (
+    <a
+      href="https://theinet.vercel.app/"
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group flex w-fit items-center gap-3 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+      aria-label="THE INET official website"
+      title="Open THE INET official website"
+    >
+      <QrCode className="text-blue-500 transition-transform group-hover:scale-105" size={34} strokeWidth={2.25} aria-hidden="true" />
+      <span className="leading-tight">
+        <span className="block text-xl font-bold tracking-wide text-slate-950">THE INET</span>
+        <span className="block text-sm text-slate-500 transition-colors group-hover:text-accent">News Intelligence Hub</span>
+      </span>
+    </a>
+  );
+}
+
+function PublicHeader({language, setLanguage}: {language: Language; setLanguage: (language: Language) => void}) {
+  return (
+    <header className="border-b border-line bg-white shadow-sm">
+      <div className="flex w-full items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
+        <BrandLink />
+        <LanguageSwitch language={language} setLanguage={setLanguage} />
+      </div>
+    </header>
+  );
+}
+
+function Footer({language}: {language: Language}) {
+  const t = (value: string) => translate(language, value);
+  const links = [
+    {label: 'LinkedIn', href: 'https://www.linkedin.com/in/theinet/', icon: Linkedin},
+    {label: 'YouTube', href: 'https://www.youtube.com/@theinet_dev', icon: Youtube},
+    {label: 'X', href: 'https://x.com/theinet_dev', icon: null},
+    {label: 'GitHub', href: 'https://github.com/Theinet', icon: Github}
+  ];
+  return (
+    <footer className="mt-auto border-t border-slate-800 bg-slate-950 text-slate-300">
+      <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-5 px-4 py-7 md:flex-row">
+        <div className="flex items-center gap-3">
+          {links.map(({label, href, icon: Icon}) => (
+            <a key={label} href={href} target="_blank" rel="noopener noreferrer" aria-label={label} title={label} className="grid h-10 w-10 place-items-center rounded-full bg-slate-800 transition hover:bg-accent hover:text-white">
+              {Icon ? <Icon size={19} aria-hidden="true" /> : <span className="text-lg font-semibold" aria-hidden="true">X</span>}
+            </a>
+          ))}
+        </div>
+        <p className="text-center text-sm text-slate-400">© {new Date().getFullYear()} THE INET — {t('All rights reserved.')}</p>
+        <a href="mailto:theinet@proton.me" className="flex items-center gap-2 rounded-md px-3 py-2 text-sm transition hover:bg-slate-800 hover:text-white" title={t('Contact by email')}>
+          <Mail size={17} aria-hidden="true" /> theinet@proton.me
+        </a>
+      </div>
+    </footer>
   );
 }
 
@@ -426,7 +513,10 @@ function AuthScreen(props: {
   setToken: (token: string) => void;
   setMessage: (message: AuthMessage | null) => void;
   message: AuthMessage | null;
+  language: Language;
+  setLanguage: (language: Language) => void;
 }) {
+  const t = (value: string) => translate(props.language, value);
   const [email, setEmail] = useState('demo@example.com');
   const [password, setPassword] = useState('Password123!');
   const [mode, setMode] = useState<'login' | 'register'>('login');
@@ -501,22 +591,24 @@ function AuthScreen(props: {
   }
 
   return (
-    <main className="mx-auto grid min-h-screen max-w-5xl place-items-center px-4">
-      <section className="w-full max-w-md rounded-lg border border-line bg-white p-6 shadow-sm">
+    <div className="flex min-h-screen flex-col">
+      <PublicHeader language={props.language} setLanguage={props.setLanguage} />
+      <main className="mx-auto grid w-full max-w-5xl flex-1 place-items-center px-4 py-8">
+       <section className="w-full max-w-md rounded-lg border border-line bg-white p-6 shadow-sm">
         <h1 className="text-2xl font-semibold">News Intelligence Hub</h1>
         <div className="mt-4 rounded-md border border-teal-100 bg-teal-50 px-3 py-2">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-accent">
-              {isLogin ? 'Sign in to your account' : 'Create a new account'}
+              {t(isLogin ? 'Sign in to your account' : 'Create a new account')}
             </h2>
             <span className="rounded bg-white px-2 py-1 text-xs font-medium text-accent">
-              {isLogin ? 'Login' : 'Registration'}
+              {t(isLogin ? 'Login' : 'Registration')}
             </span>
           </div>
           <p className="mt-1 text-xs text-slate-600">
             {isLogin
-              ? 'Use verified credentials to open your news workspace.'
-              : 'Register first, then confirm the DEV MODE email link.'}
+              ? t('Use verified credentials to open your news workspace.')
+              : t('Register first, then confirm the DEV MODE email link.')}
           </p>
         </div>
         <div className="mt-5 grid gap-3">
@@ -541,8 +633,8 @@ function AuthScreen(props: {
             <button
               type="button"
               className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full border border-line bg-white text-slate-600 hover:text-accent"
-              title="Hold to show password"
-              aria-label="Hold to show password"
+              title={t('Hold to show password')}
+              aria-label={t('Hold to show password')}
               onMouseDown={(e) => {
                 e.preventDefault();
                 setShowPassword(true);
@@ -562,10 +654,10 @@ function AuthScreen(props: {
             onClick={() => void submit()}
             disabled={submitting}
           >
-            {submitting ? 'Please wait...' : isLogin ? 'Login' : 'Register'}
+            {submitting ? t('Please wait...') : t(isLogin ? 'Login' : 'Register')}
           </button>
           <button className="text-left text-sm text-accent" onClick={() => setMode(isLogin ? 'register' : 'login')}>
-            {isLogin ? 'Create account' : 'Use existing account'}
+            {t(isLogin ? 'Create account' : 'Use existing account')}
           </button>
           {showResend && (
             <button
@@ -573,7 +665,7 @@ function AuthScreen(props: {
               onClick={() => void resendVerification()}
               disabled={resending}
             >
-              {resending ? 'Sending...' : 'Resend verification email'}
+              {resending ? t('Sending...') : t('Resend verification email')}
             </button>
           )}
           {props.message && (
@@ -593,7 +685,7 @@ function AuthScreen(props: {
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    Open verification link
+                    {t('Open verification link')}
                   </a>
                   <span className="mt-1 block break-all text-xs text-slate-600">{props.message.href}</span>
                 </>
@@ -601,8 +693,10 @@ function AuthScreen(props: {
             </div>
           )}
         </div>
-      </section>
-    </main>
+       </section>
+      </main>
+      <Footer language={props.language} />
+    </div>
   );
 }
 
@@ -629,7 +723,8 @@ function formatApiErrorText(text: string): string {
   }
 }
 
-function Verify({request}: {request: <T>(path: string, init?: RequestInit) => Promise<T>}) {
+function Verify({request, language, setLanguage}: {request: <T>(path: string, init?: RequestInit) => Promise<T>; language: Language; setLanguage: (language: Language) => void}) {
+  const t = (value: string) => translate(language, value);
   const [state, setState] = useState<'loading' | 'success' | 'error'>('loading');
   const [message, setMessage] = useState('Verifying email...');
   useEffect(() => {
@@ -645,7 +740,9 @@ function Verify({request}: {request: <T>(path: string, init?: RequestInit) => Pr
       });
   }, [request]);
   return (
-    <main className="mx-auto grid min-h-screen max-w-md place-items-center px-4">
+    <div className="flex min-h-screen flex-col">
+      <PublicHeader language={language} setLanguage={setLanguage} />
+      <main className="mx-auto grid w-full max-w-md flex-1 place-items-center px-4">
       <section className="w-full rounded-lg border border-line bg-white p-6 text-center shadow-sm">
         <p className={`text-lg ${state === 'error' ? 'text-red-700' : 'text-slate-900'}`}>{message}</p>
         {state === 'success' && (
@@ -653,11 +750,13 @@ function Verify({request}: {request: <T>(path: string, init?: RequestInit) => Pr
             className="mt-4 inline-block rounded-md bg-accent px-4 py-2 text-white"
             href="/"
           >
-            Go to Login
+            {t('Go to Login')}
           </a>
         )}
       </section>
-    </main>
+      </main>
+      <Footer language={language} />
+    </div>
   );
 }
 

@@ -1,4 +1,3 @@
-NIHAGENT-ECHO
 # News Intelligence Hub
 
 News Intelligence Hub is an RSS intelligence dashboard for technical news. It ingests feeds, filters low-value content before LLM usage, analyzes accepted articles in background workers, and exposes a feed, entity pages, digests, telemetry, and a React Flow graph.
