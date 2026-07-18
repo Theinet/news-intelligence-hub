@@ -250,3 +250,7 @@ Decision: Build `similar` graph edges with a deterministic score from title/cont
 Alternatives: Use embeddings, ask the LLM to compare article pairs, or skip semantic similarity for MVP.
 
 Trade-offs: The deterministic score is cheaper, testable, and explainable, but less nuanced than embeddings. It is enough for MVP graph context and avoids quadratic LLM usage.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
