@@ -390,7 +390,7 @@ function LanguageSwitch({language, setLanguage}: {language: Language; setLanguag
 function BrandLink() {
   return (
     <a
-      href="https://theinet.vercel.app/"
+      href="https://www.theinet.ch/"
       target="_blank"
       rel="noopener noreferrer"
       className="group flex w-fit items-center gap-3 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
@@ -436,8 +436,8 @@ function Footer({language}: {language: Language}) {
           ))}
         </div>
         <p className="text-center text-sm text-slate-400">© {new Date().getFullYear()} THE INET — {t('All rights reserved.')}</p>
-        <a href="mailto:theinet@proton.me" className="flex items-center gap-2 rounded-md px-3 py-2 text-sm transition hover:bg-slate-800 hover:text-white" title={t('Contact by email')}>
-          <Mail size={17} aria-hidden="true" /> theinet@proton.me
+        <a href="mailto:contact@theinet.ch" className="flex items-center gap-2 rounded-md px-3 py-2 text-sm transition hover:bg-slate-800 hover:text-white" title={t('Contact by email')}>
+          <Mail size={17} aria-hidden="true" /> contact@theinet.ch
         </a>
       </div>
     </footer>
